@@ -1,10 +1,11 @@
 import dayjs from 'dayjs';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
 	ListMinus, Wallet, LayoutGrid, BarChart3, Download, MoreHorizontal,
 } from 'lucide-react';
 import { TransactionForm } from './components/TransactionForm.jsx';
+import { MobileTransactionForm } from './components/MobileTransactionForm.jsx';
 import { TransactionsTable } from './components/TransactionsTable.jsx';
 import { TransactionDetail } from './components/TransactionDetail.jsx';
 import { AccountsPanel } from './components/AccountsPanel.jsx';
@@ -14,6 +15,22 @@ import { BackupPanel } from './components/BackupPanel.jsx';
 import { api } from './lib/api.js';
 import { formatCurrency } from './lib/format.js';
 import './App.css';
+
+const MOBILE_BREAKPOINT = 768;
+
+function useIsMobile() {
+	const [isMobile, setIsMobile] = useState(() =>
+		typeof window !== 'undefined' && window.innerWidth <= MOBILE_BREAKPOINT
+	);
+	useEffect(() => {
+		const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+		const handler = (e) => setIsMobile(e.matches);
+		mq.addEventListener('change', handler);
+		setIsMobile(mq.matches);
+		return () => mq.removeEventListener('change', handler);
+	}, []);
+	return isMobile;
+}
 
 const ICON_SIZE = 16;
 
@@ -157,20 +174,37 @@ function App() {
 	const categoryCounts = useMemo(() => categories.map((c) => ({ ...c, total: c.total ?? 0 })), [categories]);
 	const handleMonthFilterChange = (v) => { setMonthFilter(v); setSelectedTransactionId(null); };
 
+	const isMobile = useIsMobile();
+
 	const renderTransactions = () => (
 		<>
-			<TransactionForm accounts={accounts} categories={categories} onSubmit={handleTransactionSubmit} isSubmitting={transactionMutation.isPending} suggestions={transactionSuggestions} />
+			{isMobile ? (
+				<div className="panel">
+					<div className="panel-header"><p className="panel-title">取引入力</p></div>
+					<MobileTransactionForm
+						accounts={accounts} categories={categories}
+						onSubmit={handleTransactionSubmit}
+						isSubmitting={transactionMutation.isPending}
+						suggestions={transactionSuggestions}
+					/>
+				</div>
+			) : (
+				<TransactionForm accounts={accounts} categories={categories} onSubmit={handleTransactionSubmit} isSubmitting={transactionMutation.isPending} suggestions={transactionSuggestions} />
+			)}
 			<MonthFilterControls value={monthFilter} onChange={handleMonthFilterChange} />
 			{loadingTransactions ? <p className="status">読み込み中…</p> : (
 				<div className="transactions-layout">
 					<TransactionsTable transactions={transactions} selectedId={selectedTransactionId} onSelect={setSelectedTransactionId} />
 					{selectedTransactionId && (
-						<TransactionDetail
-							transactionId={selectedTransactionId} accounts={accounts} categories={categories}
-							onClose={() => setSelectedTransactionId(null)}
-							onUpdated={(id) => refreshBookkeeping(id)}
-							onDeleted={() => { setSelectedTransactionId(null); refreshBookkeeping(); }}
-						/>
+						<>
+							{isMobile && <div className="detail-overlay" onClick={() => setSelectedTransactionId(null)} />}
+							<TransactionDetail
+								transactionId={selectedTransactionId} accounts={accounts} categories={categories}
+								onClose={() => setSelectedTransactionId(null)}
+								onUpdated={(id) => refreshBookkeeping(id)}
+								onDeleted={() => { setSelectedTransactionId(null); refreshBookkeeping(); }}
+							/>
+						</>
 					)}
 				</div>
 			)}

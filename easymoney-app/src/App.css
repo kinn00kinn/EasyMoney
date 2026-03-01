@@ -720,14 +720,16 @@ th {
 }
 
 /* ============================================================
-   Responsive
+   Responsive — Mobile-First Deep Polish
    ============================================================ */
 
+/* --- Tablet & Mobile (≤ 768px) --- */
 @media (max-width: 768px) {
 	.sidebar {
 		display: none;
 	}
 
+	/* Bottom Nav */
 	.mobile-nav {
 		display: flex;
 		position: fixed;
@@ -737,7 +739,6 @@ th {
 		z-index: 100;
 		background: var(--color-surface);
 		border-top: 1px solid var(--color-border);
-		padding: 0;
 		padding-bottom: env(safe-area-inset-bottom, 0);
 	}
 
@@ -751,63 +752,113 @@ th {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
+		justify-content: center;
 		gap: 2px;
 		padding: 8px 2px 6px;
+		min-height: 52px;
 		color: var(--color-text-tertiary);
-		font-size: 0.6rem;
+		font-size: 0.62rem;
 		font-weight: 400;
 		transition: color 0.1s;
 		-webkit-tap-highlight-color: transparent;
+		position: relative;
 	}
 
 	.mobile-nav-item[data-active='true'] {
-		color: var(--color-text);
-		font-weight: 500;
+		color: var(--color-accent);
+	}
+
+	.mobile-nav-item[data-active='true']::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 20px;
+		height: 2px;
+		background: var(--color-accent);
+		border-radius: 0 0 2px 2px;
 	}
 
 	.mobile-nav-item .nav-icon {
-		width: 20px;
-		height: 20px;
+		width: 22px;
+		height: 22px;
 	}
 
+	/* Main Area */
 	.main-area {
-		padding: 12px 16px;
-		padding-bottom: calc(56px + env(safe-area-inset-bottom, 0));
+		padding: 12px 14px;
+		padding-bottom: calc(60px + env(safe-area-inset-bottom, 0));
+		gap: 12px;
 	}
 
+	/* Header — compact */
 	.app-header {
-		flex-direction: column;
-		gap: 10px;
+		flex-direction: row;
+		align-items: center;
+		gap: 8px;
+		padding-bottom: 10px;
+	}
+
+	.app-header h1 {
+		font-size: 1.05rem;
+		flex-shrink: 0;
 	}
 
 	.header-metrics {
-		width: 100%;
+		flex: 1;
+		justify-content: flex-end;
+		gap: 10px;
 		overflow-x: auto;
 		flex-wrap: nowrap;
-		gap: 12px;
 		-webkit-overflow-scrolling: touch;
 	}
 
 	.metric-card {
-		text-align: left;
 		flex-shrink: 0;
 	}
 
+	.metric-label {
+		font-size: 0.62rem;
+	}
+
+	.metric-value {
+		font-size: 0.85rem;
+	}
+
+	/* Panels */
+	.panel {
+		border-radius: 8px;
+	}
+
+	/* Transactions */
 	.transactions-layout {
 		grid-template-columns: 1fr;
 	}
 
+	/* Transaction Detail — bottom sheet */
 	.transaction-detail {
 		position: fixed;
 		bottom: 0;
 		left: 0;
 		right: 0;
 		top: auto;
-		max-height: 70vh;
-		border-radius: 8px 8px 0 0;
-		box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.12);
+		max-height: 80vh;
+		border-radius: 12px 12px 0 0;
+		box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
 		z-index: 90;
-		animation: slideUp 0.2s ease-out;
+		animation: slideUp 0.22s ease-out;
+		padding-top: 8px;
+	}
+
+	.transaction-detail::before {
+		content: '';
+		display: block;
+		width: 32px;
+		height: 4px;
+		background: var(--color-border);
+		border-radius: 2px;
+		margin: 0 auto 8px;
 	}
 
 	@keyframes slideUp {
@@ -820,23 +871,176 @@ th {
 		}
 	}
 
-	.snake-graph-wrapper {
-		height: 280px;
+	/* Detail overlay backdrop */
+	.detail-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 89;
+		background: rgba(0, 0, 0, 0.3);
+		animation: fadeIn 0.2s ease-out;
 	}
 
+	@keyframes fadeIn {
+		from {
+			opacity: 0;
+		}
+
+		to {
+			opacity: 1;
+		}
+	}
+
+	/* Touch-friendly inputs: min 44px tap target */
+	.field input,
+	.field select {
+		min-height: 40px;
+		font-size: 16px;
+		/* prevents iOS zoom on focus */
+		padding: 8px 10px;
+	}
+
+	.btn {
+		min-height: 36px;
+		padding: 7px 14px;
+		font-size: 0.82rem;
+	}
+
+	/* Grid adjustments */
 	.form-grid {
 		grid-template-columns: 1fr 1fr;
+		gap: 8px;
+	}
+
+	.snake-graph-wrapper {
+		height: 260px;
+	}
+
+	.chart-wrapper {
+		height: 240px;
+	}
+
+	/* Mobile transaction cards */
+	.mobile-tx-list {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.mobile-tx-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 12px 0;
+		border-bottom: 1px solid var(--color-border);
+		cursor: pointer;
+		-webkit-tap-highlight-color: transparent;
+		min-height: 52px;
+	}
+
+	.mobile-tx-item:last-child {
+		border-bottom: none;
+	}
+
+	.mobile-tx-item:active {
+		background: var(--color-hover);
+		margin: 0 -12px;
+		padding-left: 12px;
+		padding-right: 12px;
+	}
+
+	.mobile-tx-item[data-selected='true'] {
+		background: var(--color-active);
+		margin: 0 -12px;
+		padding-left: 12px;
+		padding-right: 12px;
+	}
+
+	.mobile-tx-left {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.mobile-tx-desc {
+		font-weight: 500;
+		font-size: 0.88rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.mobile-tx-meta {
+		font-size: 0.7rem;
+		color: var(--color-text-tertiary);
+		margin-top: 1px;
+	}
+
+	.mobile-tx-right {
+		text-align: right;
+		flex-shrink: 0;
+		padding-left: 10px;
+	}
+
+	.mobile-tx-amount {
+		font-weight: 600;
+		font-size: 0.9rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.mobile-tx-amount[data-direction='expense'] {
+		color: var(--color-negative);
+	}
+
+	.mobile-tx-amount[data-direction='income'] {
+		color: var(--color-positive);
+	}
+
+	.mobile-tx-date {
+		font-size: 0.65rem;
+		color: var(--color-text-tertiary);
+	}
+
+	/* Hide desktop table on mobile */
+	.desktop-only {
+		display: none;
+	}
+
+	/* Chip adjustments for touch */
+	.chip {
+		padding: 6px 11px;
+		font-size: 0.78rem;
+		min-height: 32px;
+		display: inline-flex;
+		align-items: center;
+	}
+
+	/* Filter bar compact */
+	.filter-bar {
+		padding: 8px 10px;
+		gap: 8px;
+	}
+
+	.filter-actions {
+		gap: 3px;
+	}
+
+	.filter-actions .btn {
+		padding: 5px 10px;
+		font-size: 0.75rem;
 	}
 }
 
+/* --- Small Phone (≤ 480px) --- */
 @media (max-width: 480px) {
 	.main-area {
-		padding: 8px 12px;
-		padding-bottom: calc(56px + env(safe-area-inset-bottom, 0));
+		padding: 8px 10px;
+		padding-bottom: calc(60px + env(safe-area-inset-bottom, 0));
+	}
+
+	.content {
+		gap: 10px;
 	}
 
 	.panel {
-		padding: 12px;
+		padding: 10px;
 	}
 
 	.form-grid {
@@ -851,4 +1055,280 @@ th {
 	.account-grid {
 		grid-template-columns: 1fr;
 	}
+
+	.summary-grid {
+		grid-template-columns: repeat(3, 1fr);
+		gap: 6px;
+	}
+
+	.app-header h1 {
+		font-size: 0.95rem;
+	}
+}
+
+/* --- Show mobile class only on mobile --- */
+.mobile-only {
+	display: none;
+}
+
+@media (max-width: 768px) {
+	.mobile-only {
+		display: block;
+	}
+}
+
+/* ============================================================
+   Mobile Transaction Form — Finance-App Inspired (Zaim/MoneyForward)
+   ============================================================ */
+.mf {
+	display: flex;
+	flex-direction: column;
+	gap: clamp(10px, 3vw, 16px);
+}
+
+/* Topbar: date chip */
+.mf-topbar {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+}
+
+.mf-date-chip {
+	border: 1px solid var(--color-border);
+	border-radius: 20px;
+	padding: 4px 12px;
+	font-size: 0.78rem;
+	background: var(--color-surface);
+	color: var(--color-text);
+	cursor: pointer;
+	min-height: 32px;
+}
+
+.mf-date-chip:focus {
+	border-color: var(--color-accent);
+	outline: none;
+}
+
+/* Amount — hero element */
+.mf-amount-hero {
+	display: flex;
+	align-items: baseline;
+	justify-content: center;
+	gap: 2px;
+	padding: clamp(8px, 2vw, 16px) 0;
+}
+
+.mf-yen {
+	font-size: clamp(1.2rem, 5vw, 1.8rem);
+	font-weight: 600;
+	color: var(--color-text-tertiary);
+}
+
+.mf-amount-input {
+	border: none;
+	background: transparent;
+	font-size: clamp(2rem, 8vw, 3rem);
+	font-weight: 700;
+	color: var(--color-text);
+	outline: none;
+	width: 100%;
+	max-width: 10ch;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+	padding: 0;
+}
+
+.mf-amount-input::placeholder {
+	color: var(--color-border);
+}
+
+.mf-amount-input::-webkit-inner-spin-button,
+.mf-amount-input::-webkit-outer-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+.mf-amount-input[type='number'] {
+	-moz-appearance: textfield;
+	appearance: textfield;
+}
+
+.mf-amount-formatted {
+	text-align: center;
+	font-size: 0.72rem;
+	color: var(--color-text-tertiary);
+	margin: -8px 0 0;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Section */
+.mf-section {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.mf-label {
+	margin: 0;
+	font-size: 0.7rem;
+	font-weight: 600;
+	color: var(--color-text-tertiary);
+	letter-spacing: 0.02em;
+}
+
+/* Quick merchant suggestions */
+.mf-quick-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.mf-quick-chip {
+	padding: 8px clamp(10px, 3vw, 16px);
+	border: 1px solid var(--color-border);
+	border-radius: 20px;
+	background: var(--color-surface);
+	font-size: clamp(0.78rem, 2.2vw, 0.85rem);
+	font-weight: 500;
+	color: var(--color-text);
+	cursor: pointer;
+	transition: background 0.12s, border-color 0.12s;
+	-webkit-tap-highlight-color: transparent;
+	min-height: 36px;
+	white-space: nowrap;
+}
+
+.mf-quick-chip:active {
+	background: var(--color-accent-muted);
+	border-color: var(--color-accent);
+}
+
+/* Text input */
+.mf-input {
+	border: none;
+	border-bottom: 1px solid var(--color-border);
+	border-radius: 0;
+	padding: 8px 0;
+	font-size: 16px;
+	/* iOS zoom prevention */
+	min-height: 40px;
+	background: transparent;
+	color: var(--color-text);
+	width: 100%;
+	transition: border-color 0.12s;
+}
+
+.mf-input:focus {
+	border-bottom-color: var(--color-accent);
+	outline: none;
+}
+
+.mf-input::placeholder {
+	color: var(--color-text-tertiary);
+}
+
+/* Category grid — fluid columns based on viewport */
+.mf-cat-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(clamp(70px, 22vw, 100px), 1fr));
+	gap: 5px;
+}
+
+.mf-cat-chip {
+	padding: clamp(6px, 1.5vw, 10px) 4px;
+	border: 1px solid var(--color-border);
+	border-radius: 6px;
+	background: var(--color-surface);
+	font-size: clamp(0.7rem, 2vw, 0.82rem);
+	color: var(--color-text-secondary);
+	text-align: center;
+	cursor: pointer;
+	transition: all 0.1s;
+	-webkit-tap-highlight-color: transparent;
+	min-height: clamp(34px, 9vw, 40px);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.mf-cat-chip.active {
+	background: var(--color-accent);
+	border-color: var(--color-accent);
+	color: #fff;
+	font-weight: 500;
+}
+
+.mf-cat-chip:not(.active):active {
+	background: var(--color-hover);
+	border-color: var(--color-text-tertiary);
+}
+
+/* Account pills */
+.mf-acc-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.mf-acc-pill {
+	padding: 6px clamp(10px, 3vw, 16px);
+	border: 1px solid var(--color-border);
+	border-radius: 20px;
+	background: var(--color-surface);
+	font-size: clamp(0.75rem, 2vw, 0.82rem);
+	color: var(--color-text-secondary);
+	cursor: pointer;
+	transition: all 0.1s;
+	-webkit-tap-highlight-color: transparent;
+	min-height: 34px;
+	white-space: nowrap;
+}
+
+.mf-acc-pill.active {
+	background: var(--color-text);
+	border-color: var(--color-text);
+	color: var(--color-surface);
+	font-weight: 500;
+}
+
+.mf-acc-pill:not(.active):active {
+	background: var(--color-hover);
+}
+
+/* Detail toggle */
+.mf-detail-toggle {
+	padding: 6px 0;
+	color: var(--color-text-tertiary);
+	font-size: 0.78rem;
+	text-align: left;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.mf-detail-toggle:active {
+	color: var(--color-accent);
+}
+
+/* Submit — full-width CTA */
+.mf-submit {
+	width: 100%;
+	padding: clamp(10px, 3vw, 14px);
+	border: none;
+	border-radius: 8px;
+	background: var(--color-accent);
+	color: #fff;
+	font-size: clamp(0.85rem, 2.5vw, 0.95rem);
+	font-weight: 600;
+	cursor: pointer;
+	min-height: 48px;
+	transition: background 0.1s;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.mf-submit:active {
+	background: var(--color-accent-hover);
+}
+
+.mf-submit:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
 }
