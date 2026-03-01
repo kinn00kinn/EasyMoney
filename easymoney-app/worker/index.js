@@ -81,6 +81,12 @@ const transactionInput = z.object({
 	source: z.string().optional(),
 });
 
+const transactionUpdateInput = transactionInput
+	.partial()
+	.refine((value) => Object.keys(value).length > 0, {
+		message: 'At least one field is required',
+	});
+
 const confirmImportSchema = z.object({
 	rows: z
 		.array(
@@ -207,10 +213,12 @@ router.get('/transactions', async (request, env) => {
 	const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
 	const query = `
-    SELECT t.*, a.name AS account_name, c.name AS category_name, c.kind AS category_kind
+    SELECT t.*, a.name AS account_name, c.name AS category_name, c.kind AS category_kind,
+           counter.name AS counter_account_name
     FROM transactions t
     LEFT JOIN accounts a ON a.id = t.account_id
     LEFT JOIN categories c ON c.id = t.category_id
+    LEFT JOIN accounts counter ON counter.id = t.counter_account_id
     ${whereClause}
     ORDER BY t.occurred_on DESC, t.created_at DESC
     LIMIT ?
@@ -221,21 +229,7 @@ router.get('/transactions', async (request, env) => {
 		.all();
 
 	return json({
-		data: result.results.map((row) => ({
-			id: row.id,
-			date: row.occurred_on,
-			description: row.description,
-			memo: row.memo,
-			amount: centsToAmount(row.amount),
-			accountId: row.account_id,
-			accountName: row.account_name,
-			categoryId: row.category_id,
-			categoryName: row.category_name,
-			categoryKind: row.category_kind,
-			paymentMethod: row.payment_method,
-			direction: row.direction,
-			source: row.source,
-		})),
+		data: result.results.map(mapTransactionRow),
 	});
 });
 
@@ -309,6 +303,109 @@ router.post('/transactions', async (request, env) => {
 		},
 		{ status: 201 },
 	);
+});
+
+router.get('/transactions/:id', async (request, env) => {
+	const { id } = request.params;
+	const row = await fetchTransactionRow(env, id);
+	if (!row) {
+		throw createHttpError(404, 'Transaction not found');
+	}
+	const entries = await fetchTransactionEntries(env, id);
+
+	return json({
+		data: {
+			...mapTransactionRow(row),
+			entries,
+		},
+	});
+});
+
+router.patch('/transactions/:id', async (request, env) => {
+	const { id } = request.params;
+	const existing = await env.DB.prepare(`SELECT * FROM transactions WHERE id = ?`).bind(id).first();
+	if (!existing) {
+		throw createHttpError(404, 'Transaction not found');
+	}
+
+	const payload = transactionUpdateInput.parse(await parseJsonBody(request));
+	const normalizedDate = payload.date ? ensureIsoDate(payload.date) : existing.occurred_on;
+	const amountCents = payload.amount != null ? amountToCents(payload.amount) : existing.amount;
+	const description = payload.description ?? existing.description;
+	const memo = payload.memo ?? existing.memo;
+	const paymentMethod = payload.paymentMethod ?? existing.payment_method;
+	const accountId = payload.accountId ?? existing.account_id;
+	const counterAccountId = payload.counterAccountId ?? existing.counter_account_id ?? null;
+	const account = await getAccount(env, accountId);
+	if (!account) {
+		throw createHttpError(404, 'Account not found');
+	}
+
+	const categoryId = payload.categoryId ?? existing.category_id;
+	const category = categoryId ? await getCategory(env, categoryId) : null;
+
+	let direction = payload.direction ?? null;
+	if (!direction) {
+		if (category) {
+			direction = category.kind === 'income' ? 'income' : category.kind === 'expense' ? 'expense' : 'transfer';
+		} else {
+			direction = existing.direction;
+		}
+	}
+
+	if (direction === 'transfer' && !counterAccountId) {
+		throw createHttpError(400, 'Transfer requires counter account');
+	}
+	if (direction !== 'transfer' && !category) {
+		throw createHttpError(400, 'Category is required for this transaction');
+	}
+
+	const now = new Date().toISOString();
+	const statements = [
+		env.DB.prepare(
+			`UPDATE transactions
+       SET occurred_on = ?, direction = ?, description = ?, memo = ?, amount = ?, account_id = ?,
+           category_id = ?, payment_method = ?, counter_account_id = ?, updated_at = ?
+       WHERE id = ?`,
+		).bind(
+			normalizedDate,
+			direction,
+			description,
+			memo ?? null,
+			amountCents,
+			account.id,
+			category?.id ?? null,
+			paymentMethod,
+			counterAccountId,
+			now,
+			id,
+		),
+		env.DB.prepare(`DELETE FROM entries WHERE transaction_id = ?`).bind(id),
+		...buildEntries({
+			transactionId: id,
+			direction,
+			amountCents,
+			accountId: account.id,
+			categoryId: category?.id ?? null,
+			counterAccountId,
+		}).map((entry) =>
+			env.DB.prepare(
+				`INSERT INTO entries (id, transaction_id, ledger_type, ledger_id, side, amount)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+			).bind(entry.id, entry.transactionId, entry.ledgerType, entry.ledgerId, entry.side, entry.amount),
+		),
+	];
+
+	await env.DB.batch(statements);
+	const updatedRow = await fetchTransactionRow(env, id);
+	const entries = await fetchTransactionEntries(env, id);
+
+	return json({
+		data: {
+			...mapTransactionRow(updatedRow),
+			entries,
+		},
+	});
 });
 
 router.get('/analytics/summary', async (_request, env) => {
@@ -631,8 +728,63 @@ router.get('/analytics/sankey', async (_request, env) => {
 	});
 });
 
+const mapTransactionRow = (row) => ({
+	id: row.id,
+	date: row.occurred_on,
+	description: row.description,
+	memo: row.memo,
+	amount: centsToAmount(row.amount),
+	accountId: row.account_id,
+	accountName: row.account_name,
+	categoryId: row.category_id,
+	categoryName: row.category_name,
+	categoryKind: row.category_kind,
+	paymentMethod: row.payment_method,
+	direction: row.direction,
+	source: row.source,
+	counterAccountId: row.counter_account_id,
+	counterAccountName: row.counter_account_name,
+});
+
 const getAccount = (env, id) => env.DB.prepare(`SELECT * FROM accounts WHERE id = ?`).bind(id).first();
 const getCategory = (env, id) => env.DB.prepare(`SELECT * FROM categories WHERE id = ?`).bind(id).first();
+
+const fetchTransactionRow = (env, id) =>
+	env.DB.prepare(
+		`SELECT t.*, a.name AS account_name, c.name AS category_name, c.kind AS category_kind,
+          counter.name AS counter_account_name
+     FROM transactions t
+     LEFT JOIN accounts a ON a.id = t.account_id
+     LEFT JOIN categories c ON c.id = t.category_id
+     LEFT JOIN accounts counter ON counter.id = t.counter_account_id
+     WHERE t.id = ?`,
+	)
+		.bind(id)
+		.first();
+
+const fetchTransactionEntries = async (env, transactionId) => {
+	const result = await env.DB.prepare(
+		`SELECT e.*, COALESCE(a.name, c.name) AS ledger_name,
+        CASE WHEN e.ledger_type = 'account' THEN a.type ELSE c.kind END AS ledger_meta
+     FROM entries e
+     LEFT JOIN accounts a ON e.ledger_type = 'account' AND e.ledger_id = a.id
+     LEFT JOIN categories c ON e.ledger_type = 'category' AND e.ledger_id = c.id
+     WHERE e.transaction_id = ?
+     ORDER BY CASE WHEN e.side = 'debit' THEN 0 ELSE 1 END`,
+	)
+		.bind(transactionId)
+		.all();
+
+	return result.results.map((entry) => ({
+		id: entry.id,
+		ledgerType: entry.ledger_type,
+		ledgerId: entry.ledger_id,
+		ledgerName: entry.ledger_name,
+		ledgerMeta: entry.ledger_meta,
+		side: entry.side,
+		amount: centsToAmount(entry.amount),
+	}));
+};
 
 const buildEntries = ({ transactionId, direction, amountCents, accountId, categoryId, counterAccountId }) => {
 	if (direction === 'transfer') {

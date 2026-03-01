@@ -38,6 +38,8 @@ Cloudflare Worker (wrangler)
 | `POST /api/categories` | カテゴリ作成 |
 | `GET /api/transactions?month=YYYY-MM` | 取引一覧 (最新 50件) |
 | `POST /api/transactions` | 手入力取引 → 仕訳を自動生成 |
+| `GET /api/transactions/:id` | 取引詳細 + 仕訳行 |
+| `PATCH /api/transactions/:id` | 取引内容を更新（仕訳も再生成） |
 | `GET /api/analytics/summary` | 口座残高と今月の収入/支出 |
 | `GET /api/analytics/monthly` | 過去 12 ヶ月の収支推移 |
 | `GET /api/analytics/categories` | カテゴリ別の集計 |

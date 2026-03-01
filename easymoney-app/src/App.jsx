@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TransactionForm } from './components/TransactionForm.jsx';
 import { TransactionsTable } from './components/TransactionsTable.jsx';
+import { TransactionDetail } from './components/TransactionDetail.jsx';
 import { AccountsPanel } from './components/AccountsPanel.jsx';
 import { AnalyticsPanel } from './components/AnalyticsPanel.jsx';
 import { ImportPanel } from './components/ImportPanel.jsx';
@@ -21,6 +22,7 @@ function App() {
 	const [activeTab, setActiveTab] = useState('transactions');
 	const [accountForm, setAccountForm] = useState({ name: '', type: 'cash' });
 	const [categoryForm, setCategoryForm] = useState({ name: '', kind: 'expense' });
+	const [selectedTransactionId, setSelectedTransactionId] = useState(null);
 	const queryClient = useQueryClient();
 
 	const { data: accountsResponse } = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
@@ -46,18 +48,25 @@ function App() {
 	const sankey = sankeyResponse?.data ?? [];
 
 	const invalidate = (keys) => {
-		keys.forEach((key) => queryClient.invalidateQueries({ queryKey: Array.isArray(key) ? key : [key] }));
+		keys
+			.filter(Boolean)
+			.forEach((key) => queryClient.invalidateQueries({ queryKey: Array.isArray(key) ? key : [key] }));
 	};
 
-	const transactionMutation = useMutation({
-		mutationFn: api.createTransaction,
-		onSuccess: () => invalidate([
+	const refreshBookkeeping = (transactionId) => {
+		invalidate([
 			['transactions'],
 			['analytics-summary'],
 			['analytics-monthly'],
 			['analytics-categories'],
 			['accounts'],
-		]),
+			transactionId ? ['transaction', transactionId] : null,
+		]);
+	};
+
+	const transactionMutation = useMutation({
+		mutationFn: api.createTransaction,
+		onSuccess: () => refreshBookkeeping(),
 	});
 
 	const accountMutation = useMutation({
@@ -123,7 +132,26 @@ function App() {
 				onSubmit={handleTransactionSubmit}
 				isSubmitting={transactionMutation.isPending}
 			/>
-			{loadingTransactions ? <p className="status">読み込み中…</p> : <TransactionsTable transactions={transactions} />}
+			{loadingTransactions ? (
+				<p className="status">読み込み中…</p>
+			) : (
+				<div className="transactions-layout">
+					<TransactionsTable
+						transactions={transactions}
+						selectedId={selectedTransactionId}
+						onSelect={setSelectedTransactionId}
+					/>
+					{selectedTransactionId ? (
+						<TransactionDetail
+							transactionId={selectedTransactionId}
+							accounts={accounts}
+							categories={categories}
+							onClose={() => setSelectedTransactionId(null)}
+							onUpdated={(id) => refreshBookkeeping(id)}
+						/>
+					) : null}
+				</div>
+			)}
 		</>
 	);
 
@@ -236,7 +264,7 @@ function App() {
 			accounts={accounts}
 			categories={categories}
 			onImported={() => {
-				invalidate([['transactions'], ['analytics-summary'], ['analytics-monthly'], ['analytics-categories'], ['accounts']]);
+				refreshBookkeeping();
 			}}
 		/>
 	);

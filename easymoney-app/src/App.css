@@ -146,6 +146,18 @@
 	overflow-x: auto;
 }
 
+.transactions-layout {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 1rem;
+}
+
+@media (min-width: 1024px) {
+	.transactions-layout {
+		grid-template-columns: 1.6fr 1fr;
+	}
+}
+
 table {
 	width: 100%;
 	border-collapse: collapse;
@@ -157,6 +169,18 @@ td {
 	border-bottom: 1px solid #f3f4f6;
 	text-align: left;
 	font-size: 0.95rem;
+}
+
+.table-row {
+	cursor: pointer;
+}
+
+.table-row[data-selected='true'] {
+	background: #eef2ff;
+}
+
+.table-row:hover {
+	background: #f8fafc;
 }
 
 .align-right {
@@ -254,6 +278,35 @@ td {
 .table-secondary {
 	color: #94a3b8;
 	font-size: 0.85rem;
+}
+
+.transaction-detail .detail-summary {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+	gap: 0.8rem;
+	margin-bottom: 1rem;
+}
+
+.detail-section {
+	margin-top: 1rem;
+}
+
+.detail-section-title {
+	font-weight: 600;
+	margin-bottom: 0.5rem;
+}
+
+.detail-form {
+	margin-top: 0.5rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.8rem;
+}
+
+.detail-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
 }
 
 @media (max-width: 640px) {

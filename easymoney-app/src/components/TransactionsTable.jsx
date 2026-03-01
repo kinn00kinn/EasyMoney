@@ -1,6 +1,11 @@
 import { formatCurrency, formatDate } from '../lib/format.js';
 
-export function TransactionsTable({ transactions = [] }) {
+export function TransactionsTable({ transactions = [], selectedId, onSelect }) {
+	const handleSelect = (id) => {
+		if (!onSelect) return;
+		onSelect(id === selectedId ? null : id);
+	};
+
 	return (
 		<div className="panel">
 			<div className="panel-header">
@@ -22,7 +27,12 @@ export function TransactionsTable({ transactions = [] }) {
 					</thead>
 					<tbody>
 						{transactions.map((transaction) => (
-							<tr key={transaction.id}>
+							<tr
+								key={transaction.id}
+								onClick={() => handleSelect(transaction.id)}
+								className="table-row"
+								data-selected={transaction.id === selectedId}
+							>
 								<td>{formatDate(transaction.date)}</td>
 								<td>
 									<div className="table-primary">{transaction.description}</div>
