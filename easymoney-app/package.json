@@ -8,7 +8,8 @@
 		"build": "vite build",
 		"lint": "eslint .",
 		"preview": "npm run build && vite preview",
-		"deploy": "npm run build && wrangler deploy"
+		"deploy": "npm run build && node scripts/verify-d1.mjs && wrangler deploy",
+		"configure:d1": "node scripts/configure-d1.mjs"
 	},
 	"dependencies": {
 		"@tanstack/react-query": "^5.90.21",

@@ -20,7 +20,13 @@ Cloudflare Workers + React で構築した、複式簿記ベースの家計簿 W
    npm install
    ```
 
-2. Cloudflare D1 を作成し `wrangler.jsonc` の `d1_databases` セクションを実環境の `database_id` に置き換える
+2. Cloudflare D1 を作成し、払い出された `database_id` を下記コマンドで設定
+
+   ```bash
+   npm run configure:d1 <your-d1-database-id>
+   ```
+
+   任意で第 2 引数に `database_name` も上書きできます。
 3. マイグレーションを適用
 
    ```bash
@@ -43,8 +49,10 @@ Cloudflare Workers + React で構築した、複式簿記ベースの家計簿 W
 ```bash
 npm run build      # Vite ビルド + Worker バンドル
 npm run preview    # ビルド済みフロントの確認
-npm run deploy     # wrangler 経由で Cloudflare へデプロイ
+npm run deploy     # D1 設定チェック後に wrangler deploy
 ```
+
+`npm run deploy` は `wrangler.jsonc` に本番用 `database_id` が入っていない場合はエラーで停止し、Cloudflare へ無効なリクエストを送らないようになっています。既に `wrangler deploy` を直接実行する CI がある場合も同じチェックを入れてください。
 
 ## 主要機能
 
