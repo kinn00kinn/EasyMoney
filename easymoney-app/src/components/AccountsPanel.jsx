@@ -6,7 +6,7 @@ const typeLabels = {
 	credit: 'クレジット',
 };
 
-export function AccountsPanel({ accounts = [] }) {
+export function AccountsPanel({ accounts = [], onEdit, onDelete, editingAccountId, disableActions }) {
 	return (
 		<div className="panel">
 			<div className="panel-header">
@@ -17,10 +17,18 @@ export function AccountsPanel({ accounts = [] }) {
 			</div>
 			<div className="account-grid">
 				{accounts.map((account) => (
-					<div key={account.id} className="account-card">
+					<div key={account.id} className="account-card" data-editing={account.id === editingAccountId}>
 						<p className="account-name">{account.name}</p>
 						<p className="account-type">{typeLabels[account.type]}</p>
 						<p className="account-balance">{formatCurrency(account.balance)}</p>
+						<div className="account-card-actions">
+							<button className="btn secondary" type="button" onClick={() => onEdit?.(account)} disabled={disableActions}>
+								編集
+							</button>
+							<button className="btn danger" type="button" onClick={() => onDelete?.(account)} disabled={disableActions}>
+								削除
+							</button>
+						</div>
 					</div>
 				))}
 				{!accounts.length ? <p className="empty">口座を登録してください</p> : null}

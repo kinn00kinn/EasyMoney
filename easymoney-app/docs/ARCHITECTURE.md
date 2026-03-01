@@ -34,17 +34,23 @@ Cloudflare Worker (wrangler)
 | `GET /api/health` | ヘルスチェック |
 | `GET /api/accounts` | 口座一覧 + 最新残高 |
 | `POST /api/accounts` | 口座作成 |
+| `PATCH /api/accounts/:id` | 口座情報を更新 |
+| `DELETE /api/accounts/:id` | 未使用の口座を削除 |
 | `GET /api/categories` | カテゴリ一覧 + 累計 |
 | `POST /api/categories` | カテゴリ作成 |
+| `PATCH /api/categories/:id` | カテゴリ名称や区分を更新 |
+| `DELETE /api/categories/:id` | 未使用のカテゴリを削除 |
 | `GET /api/transactions?month=YYYY-MM` | 取引一覧 (最新 50件) |
 | `POST /api/transactions` | 手入力取引 → 仕訳を自動生成 |
 | `GET /api/transactions/:id` | 取引詳細 + 仕訳行 |
 | `PATCH /api/transactions/:id` | 取引内容を更新（仕訳も再生成） |
+| `DELETE /api/transactions/:id` | 取引を削除 |
 | `GET /api/transactions/suggestions` | 入力支援の候補 (よく使うお店/カテゴリ/口座) |
 | `GET /api/analytics/summary` | 口座残高と今月の収入/支出 |
 | `GET /api/analytics/monthly` | 過去 12 ヶ月の収支推移 |
 | `GET /api/analytics/categories` | カテゴリ別の集計 |
 | `GET /api/analytics/sankey` | 支払方法 × カテゴリの出力データ |
+| `GET /api/backup` | 全データの JSON バックアップをダウンロード |
 | `POST /api/imports/paypay` | PayPay銀行 CSV を取り込み (multipart/form-data) |
 | `GET /api/imports/:id` | 取り込み行の確認 |
 | `POST /api/imports/:id/confirm` | 行ごとにカテゴリを割り当てて仕訳化 |

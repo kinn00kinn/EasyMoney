@@ -112,6 +112,12 @@
 	background: #f3f4f6;
 }
 
+.btn.danger {
+	background: #fee2e2;
+	border-color: #fecaca;
+	color: #b91c1c;
+}
+
 .account-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -123,6 +129,11 @@
 	border-radius: 0.9rem;
 	padding: 0.9rem;
 	background: #f8fafc;
+}
+
+.account-card[data-editing='true'] {
+	border-color: #6366f1;
+	box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
 .account-name {
@@ -140,6 +151,13 @@
 	font-size: 1.3rem;
 	font-weight: 700;
 	margin: 0.4rem 0 0;
+}
+
+.account-card-actions {
+	margin-top: 0.8rem;
+	display: flex;
+	gap: 0.5rem;
+	flex-wrap: wrap;
 }
 
 .table-scroll {
@@ -198,6 +216,10 @@ td {
 
 .table-row:hover {
 	background: #f8fafc;
+}
+
+.panel table tr[data-editing='true'] {
+	background: #eef2ff;
 }
 
 .align-right {
@@ -284,6 +306,10 @@ td {
 	margin: 0.5rem 0;
 }
 
+.status.error {
+	color: #b91c1c;
+}
+
 .inline-form .form-grid {
 	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
@@ -295,6 +321,16 @@ td {
 .table-secondary {
 	color: #94a3b8;
 	font-size: 0.85rem;
+}
+
+.category-actions {
+	display: flex;
+	gap: 0.4rem;
+	flex-wrap: wrap;
+}
+
+.category-actions .btn {
+	padding: 0.3rem 0.8rem;
 }
 
 .transaction-detail .detail-summary {

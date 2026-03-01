@@ -7,6 +7,7 @@ import { TransactionDetail } from './components/TransactionDetail.jsx';
 import { AccountsPanel } from './components/AccountsPanel.jsx';
 import { AnalyticsPanel } from './components/AnalyticsPanel.jsx';
 import { ImportPanel } from './components/ImportPanel.jsx';
+import { BackupPanel } from './components/BackupPanel.jsx';
 import { api } from './lib/api.js';
 import { formatCurrency } from './lib/format.js';
 import './App.css';
@@ -17,12 +18,15 @@ const tabs = [
 	{ id: 'categories', label: 'カテゴリ' },
 	{ id: 'analytics', label: '分析' },
 	{ id: 'import', label: 'CSV取込' },
+	{ id: 'backup', label: 'バックアップ' },
 ];
 
 function App() {
 	const [activeTab, setActiveTab] = useState('transactions');
-	const [accountForm, setAccountForm] = useState({ name: '', type: 'cash' });
+	const [accountForm, setAccountForm] = useState({ name: '', type: 'cash', note: '' });
+	const [editingAccountId, setEditingAccountId] = useState(null);
 	const [categoryForm, setCategoryForm] = useState({ name: '', kind: 'expense' });
+	const [editingCategoryId, setEditingCategoryId] = useState(null);
 	const [selectedTransactionId, setSelectedTransactionId] = useState(null);
 	const [monthFilter, setMonthFilter] = useState(dayjs().format('YYYY-MM'));
 	const queryClient = useQueryClient();
@@ -74,19 +78,71 @@ function App() {
 		onSuccess: () => refreshBookkeeping(),
 	});
 
+	const resetAccountForm = () => {
+		setAccountForm({ name: '', type: 'cash', note: '' });
+	};
+
 	const accountMutation = useMutation({
 		mutationFn: api.createAccount,
 		onSuccess: () => {
 			invalidate([['accounts']]);
-			setAccountForm({ name: '', type: 'cash' });
+			resetAccountForm();
 		},
 	});
+
+	const accountUpdateMutation = useMutation({
+		mutationFn: ({ id, data }) => api.updateAccount(id, data),
+		onSuccess: () => {
+			invalidate([['accounts']]);
+			resetAccountForm();
+			setEditingAccountId(null);
+		},
+	});
+
+	const accountDeleteMutation = useMutation({
+		mutationFn: (id) => api.deleteAccount(id),
+		onSuccess: (_data, deletedId) => {
+			invalidate([['accounts']]);
+			setEditingAccountId((current) => {
+				if (current === deletedId) {
+					resetAccountForm();
+					return null;
+				}
+				return current;
+			});
+		},
+	});
+
+	const resetCategoryForm = () => setCategoryForm({ name: '', kind: 'expense' });
 
 	const categoryMutation = useMutation({
 		mutationFn: api.createCategory,
 		onSuccess: () => {
 			invalidate([['categories'], ['analytics-categories']]);
-			setCategoryForm({ name: '', kind: 'expense' });
+			resetCategoryForm();
+		},
+	});
+
+	const categoryUpdateMutation = useMutation({
+		mutationFn: ({ id, data }) => api.updateCategory(id, data),
+		onSuccess: () => {
+			invalidate([['categories'], ['analytics-categories']]);
+			resetCategoryForm();
+			setEditingCategoryId(null);
+		},
+	});
+
+	const categoryDeleteMutation = useMutation({
+		mutationFn: (id) => api.deleteCategory(id),
+		onSuccess: (_data, deletedId) => {
+			invalidate([['categories'], ['analytics-categories']]);
+			setEditingCategoryId((current) => {
+				if (current === deletedId) {
+					resetCategoryForm();
+					return null;
+				}
+				return current;
+			});
 		},
 	});
 
@@ -105,19 +161,73 @@ function App() {
 	const handleAccountSubmit = (event) => {
 		event.preventDefault();
 		if (!accountForm.name) return;
-		accountMutation.mutate({
+		const payload = {
 			name: accountForm.name,
 			type: accountForm.type,
+			note: accountForm.note,
+		};
+		if (editingAccountId) {
+			accountUpdateMutation.mutate({ id: editingAccountId, data: payload });
+		} else {
+			accountMutation.mutate(payload);
+		}
+	};
+
+	const handleAccountEdit = (account) => {
+		setEditingAccountId(account.id);
+		setAccountForm({
+			name: account.name,
+			type: account.type,
+			note: account.note ?? '',
 		});
+	};
+
+	const handleAccountDelete = (account) => {
+		if (accountDeleteMutation.isPending) return;
+		if (!window.confirm(`${account.name} を削除します。関連する取引が無い場合のみ削除できます。`)) {
+			return;
+		}
+		accountDeleteMutation.mutate(account.id);
+	};
+
+	const handleAccountCancel = () => {
+		setEditingAccountId(null);
+		resetAccountForm();
 	};
 
 	const handleCategorySubmit = (event) => {
 		event.preventDefault();
 		if (!categoryForm.name) return;
-		categoryMutation.mutate({
+		const payload = {
 			name: categoryForm.name,
 			kind: categoryForm.kind,
+		};
+		if (editingCategoryId) {
+			categoryUpdateMutation.mutate({ id: editingCategoryId, data: payload });
+		} else {
+			categoryMutation.mutate(payload);
+		}
+	};
+
+	const handleCategoryEdit = (category) => {
+		setEditingCategoryId(category.id);
+		setCategoryForm({
+			name: category.name,
+			kind: category.kind,
 		});
+	};
+
+	const handleCategoryDelete = (category) => {
+		if (categoryDeleteMutation.isPending) return;
+		if (!window.confirm(`${category.name} を削除しますか？このカテゴリを利用中の取引があると削除できません。`)) {
+			return;
+		}
+		categoryDeleteMutation.mutate(category.id);
+	};
+
+	const handleCategoryCancel = () => {
+		setEditingCategoryId(null);
+		resetCategoryForm();
 	};
 
 	const categoryCounts = useMemo(
@@ -160,6 +270,10 @@ function App() {
 							categories={categories}
 							onClose={() => setSelectedTransactionId(null)}
 							onUpdated={(id) => refreshBookkeeping(id)}
+							onDeleted={() => {
+								setSelectedTransactionId(null);
+								refreshBookkeeping();
+							}}
 						/>
 					) : null}
 				</div>
@@ -169,16 +283,44 @@ function App() {
 
 	const renderAccounts = () => (
 		<>
-			<AccountsPanel accounts={accounts} />
+			<AccountsPanel
+				accounts={accounts}
+				onEdit={handleAccountEdit}
+				onDelete={handleAccountDelete}
+				editingAccountId={editingAccountId}
+				disableActions={accountDeleteMutation.isPending || accountUpdateMutation.isPending}
+			/>
 			<form className="panel inline-form" onSubmit={handleAccountSubmit}>
 				<div className="panel-header">
 					<div>
-						<p className="panel-title">口座を追加</p>
+						<p className="panel-title">{editingAccountId ? '口座を編集' : '口座を追加'}</p>
 					</div>
 					<div>
-						<button type="submit" className="btn primary" disabled={accountMutation.isPending}>
-							追加
+						<button
+							type="submit"
+							className="btn primary"
+							disabled={
+								accountMutation.isPending || accountUpdateMutation.isPending || accountDeleteMutation.isPending
+							}
+						>
+							{editingAccountId
+								? accountUpdateMutation.isPending
+									? '更新中…'
+									: '更新'
+								: accountMutation.isPending
+									? '追加中…'
+									: '追加'}
 						</button>
+						{editingAccountId ? (
+							<button
+								type="button"
+								className="btn secondary"
+								onClick={handleAccountCancel}
+								disabled={accountUpdateMutation.isPending}
+							>
+								キャンセル
+							</button>
+						) : null}
 					</div>
 				</div>
 				<div className="form-grid">
@@ -199,7 +341,18 @@ function App() {
 							<option value="credit">クレジット</option>
 						</select>
 					</label>
+					<label className="field">
+						<span>メモ</span>
+						<input
+							type="text"
+							value={accountForm.note}
+							onChange={(event) => setAccountForm((prev) => ({ ...prev, note: event.target.value }))}
+							placeholder="任意"
+						/>
+					</label>
 				</div>
+				{accountUpdateMutation.isError ? <p className="status">{accountUpdateMutation.error?.message}</p> : null}
+				{accountDeleteMutation.isError ? <p className="status">{accountDeleteMutation.error?.message}</p> : null}
 			</form>
 		</>
 	);
@@ -219,14 +372,25 @@ function App() {
 								<th>名称</th>
 								<th>区分</th>
 								<th className="align-right">累計</th>
+								<th>操作</th>
 							</tr>
 						</thead>
 						<tbody>
 							{categoryCounts.map((category) => (
-								<tr key={category.id}>
+								<tr key={category.id} data-editing={category.id === editingCategoryId}>
 									<td>{category.name}</td>
 									<td>{category.kind === 'income' ? '収入' : category.kind === 'expense' ? '支出' : '振替'}</td>
 									<td className="align-right">{formatCurrency(category.total)}</td>
+									<td>
+										<div className="category-actions">
+											<button className="btn secondary" type="button" onClick={() => handleCategoryEdit(category)} disabled={categoryUpdateMutation.isPending}>
+												編集
+											</button>
+											<button className="btn danger" type="button" onClick={() => handleCategoryDelete(category)} disabled={categoryDeleteMutation.isPending}>
+												削除
+											</button>
+										</div>
+									</td>
 								</tr>
 							))}
 						</tbody>
@@ -236,12 +400,34 @@ function App() {
 			<form className="panel inline-form" onSubmit={handleCategorySubmit}>
 				<div className="panel-header">
 					<div>
-						<p className="panel-title">カテゴリを追加</p>
+						<p className="panel-title">{editingCategoryId ? 'カテゴリを編集' : 'カテゴリを追加'}</p>
 					</div>
 					<div>
-						<button type="submit" className="btn primary" disabled={categoryMutation.isPending}>
-							追加
+						<button
+							type="submit"
+							className="btn primary"
+							disabled={
+								categoryMutation.isPending || categoryUpdateMutation.isPending || categoryDeleteMutation.isPending
+							}
+						>
+							{editingCategoryId
+								? categoryUpdateMutation.isPending
+									? '更新中…'
+									: '更新'
+								: categoryMutation.isPending
+									? '追加中…'
+									: '追加'}
 						</button>
+						{editingCategoryId ? (
+							<button
+								type="button"
+								className="btn secondary"
+								onClick={handleCategoryCancel}
+								disabled={categoryUpdateMutation.isPending}
+							>
+								キャンセル
+							</button>
+						) : null}
 					</div>
 				</div>
 				<div className="form-grid">
@@ -263,6 +449,8 @@ function App() {
 						</select>
 					</label>
 				</div>
+				{categoryUpdateMutation.isError ? <p className="status">{categoryUpdateMutation.error?.message}</p> : null}
+				{categoryDeleteMutation.isError ? <p className="status">{categoryDeleteMutation.error?.message}</p> : null}
 			</form>
 		</>
 	);
@@ -284,6 +472,8 @@ function App() {
 		/>
 	);
 
+	const renderBackup = () => <BackupPanel />;
+
 	const renderContent = () => {
 		switch (activeTab) {
 			case 'accounts':
@@ -294,6 +484,8 @@ function App() {
 				return renderAnalytics();
 			case 'import':
 				return renderImport();
+			case 'backup':
+				return renderBackup();
 			default:
 				return renderTransactions();
 		}

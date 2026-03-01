@@ -36,13 +36,18 @@ const request = async (path, options = {}) => {
 export const api = {
 	listAccounts: () => request('/accounts'),
 	createAccount: (payload) => request('/accounts', { method: 'POST', body: payload }),
+	updateAccount: (id, payload) => request(`/accounts/${id}`, { method: 'PATCH', body: payload }),
+	deleteAccount: (id) => request(`/accounts/${id}`, { method: 'DELETE' }),
 	listCategories: () => request('/categories'),
 	createCategory: (payload) => request('/categories', { method: 'POST', body: payload }),
+	updateCategory: (id, payload) => request(`/categories/${id}`, { method: 'PATCH', body: payload }),
+	deleteCategory: (id) => request(`/categories/${id}`, { method: 'DELETE' }),
 	listTransactions: ({ month }) =>
 		request(`/transactions${month ? `?month=${month}` : ''}`),
 	createTransaction: (payload) => request('/transactions', { method: 'POST', body: payload }),
 	getTransaction: (id) => request(`/transactions/${id}`),
 	updateTransaction: (id, payload) => request(`/transactions/${id}`, { method: 'PATCH', body: payload }),
+	deleteTransaction: (id) => request(`/transactions/${id}`, { method: 'DELETE' }),
 	getTransactionSuggestions: () => request('/transactions/suggestions'),
 	getAnalyticsSummary: () => request('/analytics/summary'),
 	getAnalyticsMonthly: () => request('/analytics/monthly'),
@@ -54,4 +59,11 @@ export const api = {
 	loadImportRows: (importId) => request(`/imports/${importId}`),
 	confirmImport: (importId, rows) =>
 		request(`/imports/${importId}/confirm`, { method: 'POST', body: { rows } }),
+	downloadBackup: async () => {
+		const response = await fetch('/api/backup');
+		if (!response.ok) {
+			throw new Error('バックアップの取得に失敗しました');
+		}
+		return response;
+	},
 };
