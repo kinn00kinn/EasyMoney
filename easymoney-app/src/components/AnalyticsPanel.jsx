@@ -2,21 +2,15 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { SnakeGraph } from './SnakeGraph.jsx';
 import { formatCurrency } from '../lib/format.js';
 
-const palette = ['#0017C1', '#2563EB', '#F97316', '#E11D48', '#8B5CF6', '#22C55E', '#EC4899', '#14B8A6'];
+const palette = ['#4F46E5', '#7C3AED', '#EC4899', '#F97316', '#EAB308', '#22C55E', '#14B8A6', '#6366F1'];
 
 export function AnalyticsPanel({ summary, monthly = [], categories = [], flows = [], selectedMonth }) {
-	const expenseCategories = categories.filter((category) => category.kind === 'expense');
+	const expenseCategories = categories.filter((c) => c.kind === 'expense');
 
 	return (
 		<div className="analytics-grid">
-			{/* Summary */}
 			<div className="panel">
-				<div className="panel-header">
-					<div>
-						<p className="panel-title">今月のサマリ</p>
-						<p className="panel-subtitle">収入 / 支出 / 収支</p>
-					</div>
-				</div>
+				<div className="panel-header"><p className="panel-title">今月のサマリ</p></div>
 				<div className="summary-grid">
 					<div>
 						<p className="summary-label">収入</p>
@@ -33,86 +27,56 @@ export function AnalyticsPanel({ summary, monthly = [], categories = [], flows =
 				</div>
 			</div>
 
-			{/* Monthly Trends */}
 			<div className="panel chart-panel">
-				<div className="panel-header">
-					<div>
-						<p className="panel-title">月次推移</p>
-						<p className="panel-subtitle">過去 12 ヶ月</p>
-					</div>
-				</div>
+				<div className="panel-header"><p className="panel-title">月次推移</p></div>
 				<div className="chart-wrapper">
-					<ResponsiveContainer width="100%" height={300}>
+					<ResponsiveContainer width="100%" height={280}>
 						<LineChart data={monthly}>
-							<CartesianGrid strokeDasharray="3 3" stroke="#EBEBEB" />
-							<XAxis dataKey="month" tick={{ fontSize: 12, fill: '#626264' }} />
-							<YAxis tick={{ fontSize: 12, fill: '#626264' }} />
+							<CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+							<XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)' }} />
+							<YAxis tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)' }} width={50} />
 							<Tooltip
-								formatter={(value) => formatCurrency(value)}
-								contentStyle={{
-									background: '#fff',
-									border: '1px solid #D9D9D9',
-									borderRadius: '8px',
-									fontSize: '0.85rem',
-								}}
+								formatter={(v) => formatCurrency(v)}
+								contentStyle={{ background: '#fff', border: '1px solid var(--color-border)', borderRadius: '4px', fontSize: '0.8rem' }}
 							/>
-							<Legend wrapperStyle={{ fontSize: '0.8rem' }} />
-							<Line type="monotone" dataKey="income" stroke="#118040" name="収入" strokeWidth={2} dot={false} />
-							<Line type="monotone" dataKey="expense" stroke="#C53030" name="支出" strokeWidth={2} dot={false} />
-							<Line type="monotone" dataKey="net" stroke="#0017C1" name="差額" strokeWidth={2} dot={false} />
+							<Legend wrapperStyle={{ fontSize: '0.75rem' }} />
+							<Line type="monotone" dataKey="income" stroke="#16A34A" name="収入" strokeWidth={1.5} dot={false} />
+							<Line type="monotone" dataKey="expense" stroke="#DC2626" name="支出" strokeWidth={1.5} dot={false} />
+							<Line type="monotone" dataKey="net" stroke="#4F46E5" name="差額" strokeWidth={1.5} dot={false} />
 						</LineChart>
 					</ResponsiveContainer>
 				</div>
 			</div>
 
-			{/* Category Breakdown */}
 			<div className="panel chart-panel">
 				<div className="panel-header">
 					<div>
 						<p className="panel-title">カテゴリ別支出</p>
-						<p className="panel-subtitle">
-							{selectedMonth ? `対象月: ${selectedMonth}` : '全期間を集計'}
-						</p>
+						<p className="panel-subtitle">{selectedMonth || '全期間'}</p>
 					</div>
 				</div>
 				<div className="chart-wrapper">
-					<ResponsiveContainer width="100%" height={300}>
+					<ResponsiveContainer width="100%" height={280}>
 						<PieChart>
-							<Pie
-								data={expenseCategories}
-								dataKey="total"
-								nameKey="name"
-								outerRadius={100}
-								innerRadius={55}
-								paddingAngle={2}
-								cornerRadius={3}
-							>
-								{expenseCategories.map((entry, index) => (
-									<Cell key={entry.id} fill={palette[index % palette.length]} />
-								))}
+							<Pie data={expenseCategories} dataKey="total" nameKey="name" outerRadius={95} innerRadius={50} paddingAngle={1}>
+								{expenseCategories.map((e, i) => <Cell key={e.id} fill={palette[i % palette.length]} />)}
 							</Pie>
 							<Tooltip
-								formatter={(value, _name, props) => `${props.payload.name}: ${formatCurrency(value)}`}
-								contentStyle={{
-									background: '#fff',
-									border: '1px solid #D9D9D9',
-									borderRadius: '8px',
-									fontSize: '0.85rem',
-								}}
+								formatter={(v, _n, p) => [`${formatCurrency(v)}`, p.payload.name]}
+								contentStyle={{ background: '#fff', border: '1px solid var(--color-border)', borderRadius: '4px', fontSize: '0.8rem' }}
 							/>
-							<Legend wrapperStyle={{ fontSize: '0.8rem' }} />
+							<Legend wrapperStyle={{ fontSize: '0.72rem' }} />
 						</PieChart>
 					</ResponsiveContainer>
-					{!expenseCategories.length ? <p className="empty">まだ支出データがありません</p> : null}
+					{!expenseCategories.length && <p className="empty">まだ支出データがありません</p>}
 				</div>
 			</div>
 
-			{/* Snake (Sankey) Graph */}
 			<div className="panel">
 				<div className="panel-header">
 					<div>
 						<p className="panel-title">お金の流れ</p>
-						<p className="panel-subtitle">支払方法 → カテゴリの全体像</p>
+						<p className="panel-subtitle">支払方法 → カテゴリ</p>
 					</div>
 				</div>
 				<SnakeGraph flows={flows} />
