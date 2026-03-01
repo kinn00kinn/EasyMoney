@@ -11,8 +11,11 @@ const createInitialState = () => ({
 	paymentMethod: 'cash',
 });
 
-export function TransactionForm({ accounts = [], categories = [], onSubmit, isSubmitting }) {
+export function TransactionForm({ accounts = [], categories = [], onSubmit, isSubmitting, suggestions = {} }) {
 	const [form, setForm] = useState(() => createInitialState());
+	const merchantSuggestions = suggestions.merchants ?? [];
+	const categorySuggestions = suggestions.categories ?? [];
+	const accountSuggestions = suggestions.accounts ?? [];
 
 	const handleChange = (event) => {
 		const { name, value } = event.target;
@@ -29,6 +32,24 @@ export function TransactionForm({ accounts = [], categories = [], onSubmit, isSu
 		event.preventDefault();
 		if (!form.accountId || !form.categoryId || !form.amount) return;
 		onSubmit(form, () => setForm(createInitialState()));
+	};
+
+	const applyMerchant = (merchant) => {
+		setForm((prev) => ({
+			...prev,
+			description: merchant.description,
+			categoryId: merchant.categoryId ?? prev.categoryId,
+			accountId: merchant.accountId ?? prev.accountId,
+			paymentMethod: merchant.accountType ?? prev.paymentMethod,
+		}));
+	};
+
+	const applyCategory = (categoryId) => {
+		setForm((prev) => ({ ...prev, categoryId }));
+	};
+
+	const applyAccount = (accountId, accountType) => {
+		setForm((prev) => ({ ...prev, accountId, paymentMethod: accountType ?? prev.paymentMethod }));
 	};
 
 	return (
@@ -92,6 +113,42 @@ export function TransactionForm({ accounts = [], categories = [], onSubmit, isSu
 					</select>
 				</label>
 			</div>
+			{merchantSuggestions.length ? (
+				<SuggestionGroup title="よく使うお店">
+					{merchantSuggestions.map((merchant) => (
+						<button key={merchant.description} type="button" className="chip" onClick={() => applyMerchant(merchant)}>
+							{merchant.description}
+						</button>
+					))}
+				</SuggestionGroup>
+			) : null}
+			{categorySuggestions.length ? (
+				<SuggestionGroup title="よく使うカテゴリ">
+					{categorySuggestions.map((category) => (
+						<button key={category.id} type="button" className="chip" onClick={() => applyCategory(category.id)}>
+							{category.name}
+						</button>
+					))}
+				</SuggestionGroup>
+			) : null}
+			{accountSuggestions.length ? (
+				<SuggestionGroup title="よく使う支払方法">
+					{accountSuggestions.map((account) => (
+						<button key={account.id} type="button" className="chip" onClick={() => applyAccount(account.id, account.type)}>
+							{account.name}
+						</button>
+					))}
+				</SuggestionGroup>
+			) : null}
 		</form>
+	);
+}
+
+function SuggestionGroup({ title, children }) {
+	return (
+		<div className="suggestion-group">
+			<p className="suggestion-label">{title}</p>
+			<div className="chip-row">{children}</div>
+		</div>
 	);
 }

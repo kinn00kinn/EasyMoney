@@ -59,6 +59,7 @@ npm run deploy     # D1 設定チェック後に wrangler deploy
 - 手入力による取引登録 (複式簿記の仕訳を自動生成)
 - 取引詳細ビューで仕訳を確認しながら編集
 - 月別フィルタで取引一覧とカテゴリ分析を切り替え
+- よく使うお店/カテゴリ/支払方法のサジェストで素早く入力
 - 口座残高・カテゴリ別累計・月次推移などの分析表示
 - PayPay 銀行 CSV 取込と仕訳への反映
 - REST API
@@ -74,5 +75,20 @@ npm run deploy     # D1 設定チェック後に wrangler deploy
 
 - `DB` … Cloudflare D1 (複式簿記データ)
 - `ASSETS` … Cloudflare による静的アセット配信 (C3 テンプレートで自動付与)
+- `DEMO_TOKEN` … デモデータ投入 API 用のトークン。任意のランダム文字列に置き換えてください。
 
 必要に応じて API キーや他サービスのバインディングを `wrangler.jsonc` の `vars` セクションに追加してください。
+
+## デモデータの投入
+
+1. `wrangler.jsonc` の `vars.DEMO_TOKEN` をランダム文字列に書き換え、Cloudflare 側でも `wrangler secret put DEMO_TOKEN` などで同じ値を設定する。
+2. デプロイ済み Worker かローカル dev サーバーを起動。
+3. トークンを環境変数にセットしてスクリプトを実行。
+
+```bash
+export DEMO_TOKEN=your_token_value
+npm run seed:demo -- --url=https://<your-worker-domain>/api/demo/seed
+# ローカルであれば --url オプションは省略可 ( http://127.0.0.1:8787/api/demo/seed )
+```
+
+`?reset=true` を付けると既存の取引やインポートを削除してからサンプル（食費/日用品/給与など8件）を挿入します。

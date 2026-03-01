@@ -43,6 +43,7 @@ export const api = {
 	createTransaction: (payload) => request('/transactions', { method: 'POST', body: payload }),
 	getTransaction: (id) => request(`/transactions/${id}`),
 	updateTransaction: (id, payload) => request(`/transactions/${id}`, { method: 'PATCH', body: payload }),
+	getTransactionSuggestions: () => request('/transactions/suggestions'),
 	getAnalyticsSummary: () => request('/analytics/summary'),
 	getAnalyticsMonthly: () => request('/analytics/monthly'),
 	getAnalyticsByCategory: ({ month }) =>

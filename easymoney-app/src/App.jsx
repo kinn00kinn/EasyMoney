@@ -40,6 +40,7 @@ function App() {
 		queryFn: () => api.getAnalyticsByCategory({ month: monthFilter || undefined }),
 	});
 	const { data: sankeyResponse } = useQuery({ queryKey: ['analytics-sankey'], queryFn: api.getSankey });
+	const { data: suggestionResponse } = useQuery({ queryKey: ['transaction-suggestions'], queryFn: api.getTransactionSuggestions });
 
 	const accounts = accountsResponse?.data ?? [];
 	const categories = categoriesResponse?.data ?? [];
@@ -48,6 +49,7 @@ function App() {
 	const monthly = monthlyResponse?.data ?? [];
 	const categoryAnalytics = categoryAnalyticsResponse?.data ?? [];
 	const sankey = sankeyResponse?.data ?? [];
+	const transactionSuggestions = suggestionResponse?.data ?? {};
 
 	const invalidate = (keys) => {
 		keys
@@ -62,6 +64,7 @@ function App() {
 			['analytics-monthly'],
 			['analytics-categories', monthFilter || 'all'],
 			['accounts'],
+			['transaction-suggestions'],
 			transactionId ? ['transaction', transactionId] : null,
 		]);
 	};
@@ -138,6 +141,7 @@ function App() {
 				categories={categories}
 				onSubmit={handleTransactionSubmit}
 				isSubmitting={transactionMutation.isPending}
+				suggestions={transactionSuggestions}
 			/>
 			<MonthFilterControls value={monthFilter} onChange={handleMonthFilterChange} />
 			{loadingTransactions ? (

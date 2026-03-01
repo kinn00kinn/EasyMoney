@@ -326,6 +326,36 @@ td {
 	gap: 0.5rem;
 }
 
+.suggestion-group {
+	margin-top: 0.8rem;
+}
+
+.suggestion-label {
+	margin: 0 0 0.3rem;
+	color: #64748b;
+	font-size: 0.85rem;
+}
+
+.chip-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.chip {
+	border: 1px solid #e2e8f0;
+	background: #f8fafc;
+	padding: 0.35rem 0.8rem;
+	border-radius: 999px;
+	font-size: 0.85rem;
+	cursor: pointer;
+}
+
+.chip:hover {
+	background: #e0e7ff;
+	border-color: #c7d2fe;
+}
+
 @media (max-width: 640px) {
 	.layout {
 		padding: 1rem;

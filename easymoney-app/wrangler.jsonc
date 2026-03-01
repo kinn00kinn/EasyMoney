@@ -25,5 +25,8 @@
 			"database_name": "easymoney-db",
 			"database_id": "7c84ad56-95a9-4f62-a75f-1edc3955d66d"
 		}
-	]
+	],
+	"vars": {
+		"DEMO_TOKEN": "__SET_DEMO_TOKEN__"
+	}
 }

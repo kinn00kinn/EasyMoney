@@ -235,74 +235,9 @@ router.get('/transactions', async (request, env) => {
 
 router.post('/transactions', async (request, env) => {
 	const payload = transactionInput.parse(await parseJsonBody(request));
-	const normalizedDate = ensureIsoDate(payload.date);
-	const amountCents = amountToCents(payload.amount);
-	const account = await getAccount(env, payload.accountId);
-	if (!account) throw createHttpError(404, 'Account not found');
+	const result = await createTransactionRecord(env, payload);
 
-	const category = payload.categoryId ? await getCategory(env, payload.categoryId) : null;
-	const direction =
-		payload.direction ?? (category?.kind === 'income' ? 'income' : category?.kind === 'expense' ? 'expense' : 'transfer');
-
-	if (direction === 'transfer' && !payload.counterAccountId) {
-		throw createHttpError(400, 'Transfer requires counter account');
-	}
-
-	const transactionId = crypto.randomUUID();
-	const now = new Date().toISOString();
-	const statements = [
-		env.DB.prepare(
-			`INSERT INTO transactions (
-        id, occurred_on, direction, description, memo, amount,
-        account_id, category_id, payment_method, counter_account_id, source, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		).bind(
-			transactionId,
-			normalizedDate,
-			direction,
-			payload.description,
-			payload.memo ?? null,
-			amountCents,
-			account.id,
-			category?.id ?? null,
-			payload.paymentMethod,
-			payload.counterAccountId ?? null,
-			payload.source ?? 'manual',
-			now,
-			now,
-		),
-		...buildEntries({
-			transactionId,
-			direction,
-			amountCents,
-			accountId: account.id,
-			categoryId: category?.id ?? null,
-			counterAccountId: payload.counterAccountId ?? null,
-		}).map((entry) =>
-			env.DB.prepare(
-				`INSERT INTO entries (id, transaction_id, ledger_type, ledger_id, side, amount)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-			).bind(entry.id, entry.transactionId, entry.ledgerType, entry.ledgerId, entry.side, entry.amount),
-		),
-	];
-
-	await env.DB.batch(statements);
-
-	return json(
-		{
-			data: {
-				id: transactionId,
-				date: normalizedDate,
-				description: payload.description,
-				amount: centsToAmount(amountCents),
-				accountId: account.id,
-				categoryId: category?.id ?? null,
-				direction,
-				paymentMethod: payload.paymentMethod,
-			},
-		},
-		{ status: 201 },
-	);
+	return json({ data: result }, { status: 201 });
 });
 
 router.get('/transactions/:id', async (request, env) => {
@@ -405,6 +340,185 @@ router.patch('/transactions/:id', async (request, env) => {
 			...mapTransactionRow(updatedRow),
 			entries,
 		},
+	});
+});
+
+router.get('/transactions/suggestions', async (_request, env) => {
+	const [accountsRows, categoriesRows, merchantRows] = await Promise.all([
+		env.DB.prepare(
+			`SELECT a.id, a.name, a.type, COUNT(t.id) AS usage_count
+       FROM accounts a
+       LEFT JOIN transactions t ON t.account_id = a.id
+       GROUP BY a.id
+       HAVING usage_count > 0
+       ORDER BY usage_count DESC
+       LIMIT 5`,
+		).all(),
+		env.DB.prepare(
+			`SELECT c.id, c.name, COUNT(t.id) AS usage_count
+       FROM categories c
+       LEFT JOIN transactions t ON t.category_id = c.id
+       WHERE t.id IS NOT NULL
+       GROUP BY c.id
+       ORDER BY usage_count DESC
+       LIMIT 6`,
+		).all(),
+		env.DB.prepare(
+			`SELECT description,
+        COUNT(*) AS usage_count,
+        MAX(category_id) AS category_id,
+        MAX(account_id) AS account_id
+       FROM transactions
+       WHERE description IS NOT NULL AND TRIM(description) != ''
+       GROUP BY description
+       ORDER BY usage_count DESC, MAX(occurred_on) DESC
+       LIMIT 6`,
+		).all(),
+	]);
+
+	const accountMap = new Map(accountsRows.results.map((row) => [row.id, row]));
+	const categoryMap = new Map(categoriesRows.results.map((row) => [row.id, row]));
+
+	const merchants = merchantRows.results.map((row) => ({
+		description: row.description,
+		usage: row.usage_count,
+		categoryId: row.category_id,
+		categoryName: categoryMap.get(row.category_id)?.name ?? null,
+		accountId: row.account_id,
+		accountName: accountMap.get(row.account_id)?.name ?? null,
+		accountType: accountMap.get(row.account_id)?.type ?? null,
+	}));
+
+	return json({
+		data: {
+			accounts: accountsRows.results.map((row) => ({
+				id: row.id,
+				name: row.name,
+				type: row.type,
+			})),
+			categories: categoriesRows.results.map((row) => ({
+				id: row.id,
+				name: row.name,
+			})),
+			merchants,
+		},
+	});
+});
+
+router.post('/demo/seed', async (request, env) => {
+	authorizeDemoRequest(request, env);
+	const url = new URL(request.url);
+	const reset = url.searchParams.get('reset') === 'true';
+
+	if (reset) {
+		await env.DB.batch([
+			env.DB.prepare('DELETE FROM entries'),
+			env.DB.prepare('DELETE FROM transactions'),
+			env.DB.prepare('DELETE FROM import_rows'),
+			env.DB.prepare('DELETE FROM imports'),
+		]);
+	}
+
+	await env.DB.batch([
+		env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, name, type, sort_order) VALUES ('acc-cash', '現金', 'cash', 1)`),
+		env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, name, type, sort_order) VALUES ('acc-paypay', 'PayPay銀行', 'bank', 2)`),
+		env.DB.prepare(`INSERT OR IGNORE INTO accounts (id, name, type, sort_order) VALUES ('acc-credit', 'クレジットカード', 'credit', 3)`),
+		env.DB.prepare(`INSERT OR IGNORE INTO categories (id, name, kind, color) VALUES ('cat-food', '食費', 'expense', '#f87171')`),
+		env.DB.prepare(`INSERT OR IGNORE INTO categories (id, name, kind, color) VALUES ('cat-daily', '日用品', 'expense', '#fb923c')`),
+		env.DB.prepare(`INSERT OR IGNORE INTO categories (id, name, kind, color) VALUES ('cat-transport', '交通費', 'expense', '#60a5fa')`),
+		env.DB.prepare(`INSERT OR IGNORE INTO categories (id, name, kind, color) VALUES ('cat-entertainment', '娯楽', 'expense', '#a78bfa')`),
+		env.DB.prepare(`INSERT OR IGNORE INTO categories (id, name, kind, color) VALUES ('cat-utilities', '光熱費', 'expense', '#34d399')`),
+		env.DB.prepare(`INSERT OR IGNORE INTO categories (id, name, kind, color) VALUES ('cat-income', '給与収入', 'income', '#fbbf24')`),
+	]);
+
+	const makeDate = (offsetDays) => {
+		const date = new Date(Date.now() - offsetDays * 24 * 60 * 60 * 1000);
+		return date.toISOString().slice(0, 10);
+	};
+
+	const samples = [
+		{
+			date: makeDate(2),
+			description: 'スターバックス',
+			memo: '朝のコーヒー',
+			amount: 620,
+			accountId: 'acc-credit',
+			categoryId: 'cat-food',
+			paymentMethod: 'credit',
+		},
+		{
+			date: makeDate(3),
+			description: 'スーパー三徳',
+			memo: '夕食食材',
+			amount: 4320,
+			accountId: 'acc-paypay',
+			categoryId: 'cat-food',
+			paymentMethod: 'bank',
+		},
+		{
+			date: makeDate(4),
+			description: '無印良品',
+			amount: 2850,
+			accountId: 'acc-credit',
+			categoryId: 'cat-daily',
+			paymentMethod: 'credit',
+		},
+		{
+			date: makeDate(6),
+			description: '都営地下鉄',
+			amount: 780,
+			accountId: 'acc-cash',
+			categoryId: 'cat-transport',
+			paymentMethod: 'cash',
+		},
+		{
+			date: makeDate(8),
+			description: 'Netflix',
+			amount: 990,
+			accountId: 'acc-credit',
+			categoryId: 'cat-entertainment',
+			paymentMethod: 'credit',
+		},
+		{
+			date: makeDate(10),
+			description: '電力会社',
+			amount: 8540,
+			accountId: 'acc-paypay',
+			categoryId: 'cat-utilities',
+			paymentMethod: 'bank',
+		},
+		{
+			date: makeDate(15),
+			description: '給与振込',
+			amount: 250000,
+			accountId: 'acc-paypay',
+			categoryId: 'cat-income',
+			paymentMethod: 'bank',
+			direction: 'income',
+			memo: '3月分給与',
+		},
+		{
+			date: makeDate(1),
+			description: '書店',
+			memo: '技術書',
+			amount: 1980,
+			accountId: 'acc-credit',
+			categoryId: 'cat-entertainment',
+			paymentMethod: 'credit',
+		},
+	];
+
+	for (const sample of samples) {
+		await createTransactionRecord(env, {
+			...sample,
+			source: 'demo',
+		});
+	}
+
+	return json({
+		ok: true,
+		inserted: samples.length,
+		reset,
 	});
 });
 
@@ -746,6 +860,18 @@ const mapTransactionRow = (row) => ({
 	counterAccountName: row.counter_account_name,
 });
 
+const authorizeDemoRequest = (request, env) => {
+	if (!env.DEMO_TOKEN) {
+		throw createHttpError(403, 'Demo seeding is disabled');
+	}
+
+	const authHeader = request.headers.get('authorization') || '';
+	const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : authHeader;
+	if (token !== env.DEMO_TOKEN) {
+		throw createHttpError(403, 'Invalid demo token');
+	}
+};
+
 const getAccount = (env, id) => env.DB.prepare(`SELECT * FROM accounts WHERE id = ?`).bind(id).first();
 const getCategory = (env, id) => env.DB.prepare(`SELECT * FROM categories WHERE id = ?`).bind(id).first();
 
@@ -784,6 +910,87 @@ const fetchTransactionEntries = async (env, transactionId) => {
 		side: entry.side,
 		amount: centsToAmount(entry.amount),
 	}));
+};
+
+const createTransactionRecord = async (env, payload) => {
+	const normalizedDate = ensureIsoDate(payload.date);
+	const amountCents = amountToCents(payload.amount);
+	const account = await getAccount(env, payload.accountId);
+	if (!account) throw createHttpError(404, 'Account not found');
+
+	const category = payload.categoryId ? await getCategory(env, payload.categoryId) : null;
+	let direction = payload.direction;
+	if (!direction) {
+		if (category?.kind === 'income') {
+			direction = 'income';
+		} else if (category?.kind === 'expense') {
+			direction = 'expense';
+		} else if (payload.counterAccountId) {
+			direction = 'transfer';
+		} else {
+			direction = 'expense';
+		}
+	}
+
+	if (direction === 'transfer' && !payload.counterAccountId) {
+		throw createHttpError(400, 'Transfer requires counter account');
+	}
+	if (direction !== 'transfer' && !category) {
+		throw createHttpError(400, 'Category is required for this transaction');
+	}
+
+	const transactionId = crypto.randomUUID();
+	const now = new Date().toISOString();
+	const statements = [
+		env.DB.prepare(
+			`INSERT INTO transactions (
+        id, occurred_on, direction, description, memo, amount,
+        account_id, category_id, payment_method, counter_account_id, source, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		).bind(
+			transactionId,
+			normalizedDate,
+			direction,
+			payload.description,
+			payload.memo ?? null,
+			amountCents,
+			account.id,
+			category?.id ?? null,
+			payload.paymentMethod,
+			payload.counterAccountId ?? null,
+			payload.source ?? 'manual',
+			now,
+			now,
+		),
+		...buildEntries({
+			transactionId,
+			direction,
+			amountCents,
+			accountId: account.id,
+			categoryId: category?.id ?? null,
+			counterAccountId: payload.counterAccountId ?? null,
+		}).map((entry) =>
+			env.DB.prepare(
+				`INSERT INTO entries (id, transaction_id, ledger_type, ledger_id, side, amount)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+			).bind(entry.id, entry.transactionId, entry.ledgerType, entry.ledgerId, entry.side, entry.amount),
+		),
+	];
+
+	await env.DB.batch(statements);
+
+	return {
+		id: transactionId,
+		date: normalizedDate,
+		description: payload.description,
+		memo: payload.memo ?? null,
+		amount: centsToAmount(amountCents),
+		accountId: account.id,
+		categoryId: category?.id ?? null,
+		direction,
+		paymentMethod: payload.paymentMethod,
+		source: payload.source ?? 'manual',
+	};
 };
 
 const buildEntries = ({ transactionId, direction, amountCents, accountId, categoryId, counterAccountId }) => {
