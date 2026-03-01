@@ -80,7 +80,7 @@ export function ImportPanel({ accounts = [], categories = [], onImported }) {
 				</label>
 				<div>
 					<button className="btn secondary" type="submit" disabled={status.uploading}>
-						{status.uploading ? '解析中…' : '読み込む'}
+						{status.uploading ? '解析中…' : '📄 読み込む'}
 					</button>
 				</div>
 			</form>

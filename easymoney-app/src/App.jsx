@@ -13,12 +13,12 @@ import { formatCurrency } from './lib/format.js';
 import './App.css';
 
 const tabs = [
-	{ id: 'transactions', label: '取引入力', description: '仕訳を意識せずに素早く登録します。' },
-	{ id: 'accounts', label: '口座', description: '口座残高と支払い手段を整理します。' },
-	{ id: 'categories', label: 'カテゴリ', description: '費目や区分を整えて入力を効率化します。' },
-	{ id: 'analytics', label: '分析', description: '月次の推移とカテゴリ別の傾向をチェックします。' },
-	{ id: 'import', label: 'CSV取込', description: 'PayPay銀などの CSV を取り込みます。' },
-	{ id: 'backup', label: 'バックアップ', description: 'データを安全にエクスポートします。' },
+	{ id: 'transactions', label: '取引', fullLabel: '取引入力', description: '仕訳を意識せずに素早く登録します。' },
+	{ id: 'accounts', label: '口座', fullLabel: '口座', description: '口座残高と支払い手段を整理します。' },
+	{ id: 'categories', label: 'カテゴリ', fullLabel: 'カテゴリ', description: '費目や区分を整えて入力を効率化します。' },
+	{ id: 'analytics', label: '分析', fullLabel: '分析', description: '月次の推移とカテゴリ別の傾向をチェックします。' },
+	{ id: 'import', label: '取込', fullLabel: 'CSV取込', description: 'PayPay銀などの CSV を取り込みます。' },
+	{ id: 'backup', label: 'その他', fullLabel: 'バックアップ', description: 'データを安全にエクスポートします。' },
 ];
 
 function App() {
@@ -59,7 +59,7 @@ function App() {
 		{ label: '今月の収入', value: summary?.month?.income ?? 0, tone: 'positive' },
 		{ label: '今月の支出', value: summary?.month?.expense ?? 0, tone: 'negative' },
 		{
-			label: '今月の差分',
+			label: '収支',
 			value: summary?.month?.net ?? 0,
 			tone: (summary?.month?.net ?? 0) >= 0 ? 'positive' : 'negative',
 		},
@@ -306,7 +306,7 @@ function App() {
 					<div>
 						<p className="panel-title">{editingAccountId ? '口座を編集' : '口座を追加'}</p>
 					</div>
-					<div>
+					<div className="detail-actions">
 						<button
 							type="submit"
 							className="btn primary"
@@ -362,8 +362,8 @@ function App() {
 						/>
 					</label>
 				</div>
-				{accountUpdateMutation.isError ? <p className="status">{accountUpdateMutation.error?.message}</p> : null}
-				{accountDeleteMutation.isError ? <p className="status">{accountDeleteMutation.error?.message}</p> : null}
+				{accountUpdateMutation.isError ? <p className="status error">{accountUpdateMutation.error?.message}</p> : null}
+				{accountDeleteMutation.isError ? <p className="status error">{accountDeleteMutation.error?.message}</p> : null}
 			</form>
 		</>
 	);
@@ -413,7 +413,7 @@ function App() {
 					<div>
 						<p className="panel-title">{editingCategoryId ? 'カテゴリを編集' : 'カテゴリを追加'}</p>
 					</div>
-					<div>
+					<div className="detail-actions">
 						<button
 							type="submit"
 							className="btn primary"
@@ -460,8 +460,8 @@ function App() {
 						</select>
 					</label>
 				</div>
-				{categoryUpdateMutation.isError ? <p className="status">{categoryUpdateMutation.error?.message}</p> : null}
-				{categoryDeleteMutation.isError ? <p className="status">{categoryDeleteMutation.error?.message}</p> : null}
+				{categoryUpdateMutation.isError ? <p className="status error">{categoryUpdateMutation.error?.message}</p> : null}
+				{categoryDeleteMutation.isError ? <p className="status error">{categoryDeleteMutation.error?.message}</p> : null}
 			</form>
 		</>
 	);
@@ -504,6 +504,7 @@ function App() {
 
 	return (
 		<div className="app-shell">
+			{/* Desktop Sidebar */}
 			<aside className="sidebar">
 				<div className="sidebar-brand">
 					<div className="logo-mark">EM</div>
@@ -523,23 +524,22 @@ function App() {
 							aria-current={tab.id === activeTab ? 'page' : undefined}
 						>
 							<NavIcon id={tab.id} />
-							<div>
-								<span className="nav-label">{tab.label}</span>
-								<span className="nav-description">{tab.description}</span>
-							</div>
+							<span className="nav-label">{tab.fullLabel}</span>
 						</button>
 					))}
 				</nav>
 				<div className="sidebar-meta">
-					<p className="sidebar-date">本日 {today}</p>
-					<p className="sidebar-hint">Tab / Enter でメニュー操作できます</p>
+					<p className="sidebar-date">{today}</p>
+					<p className="sidebar-hint">Tab / Enter で操作</p>
 				</div>
 			</aside>
+
+			{/* Main Content */}
 			<div className="main-area">
 				<header className="app-header">
 					<div>
-						<p className="eyebrow">現在のモード</p>
-						<h1>{activeTabMeta.label}</h1>
+						<p className="eyebrow">EasyMoney</p>
+						<h1>{activeTabMeta.fullLabel}</h1>
 						<p className="app-subtitle">{activeTabMeta.description}</p>
 					</div>
 					<div className="header-metrics">
@@ -553,6 +553,25 @@ function App() {
 				</header>
 				<main className="content">{renderContent()}</main>
 			</div>
+
+			{/* Mobile Bottom Navigation */}
+			<nav className="mobile-nav" aria-label="モバイルメニュー">
+				<div className="mobile-nav-inner">
+					{tabs.map((tab) => (
+						<button
+							key={tab.id}
+							className="mobile-nav-item"
+							type="button"
+							onClick={() => setActiveTab(tab.id)}
+							data-active={tab.id === activeTab}
+							aria-current={tab.id === activeTab ? 'page' : undefined}
+						>
+							<NavIcon id={tab.id} />
+							<span>{tab.label}</span>
+						</button>
+					))}
+				</div>
+			</nav>
 		</div>
 	);
 }
@@ -622,14 +641,9 @@ function NavIcon({ id }) {
 		case 'backup':
 			return (
 				<svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-					<path
-						d="M7 10a5 5 0 0 1 9.62-1.74A4.5 4.5 0 1 1 17 18H8.5"
-						stroke="currentColor"
-						strokeWidth="1.8"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-					/>
-					<path d="M12 12v6m0 0 2.5-2.5M12 18l-2.5-2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+					<circle cx="12" cy="12" r="1.5" fill="currentColor" />
+					<circle cx="12" cy="6" r="1.5" fill="currentColor" />
+					<circle cx="12" cy="18" r="1.5" fill="currentColor" />
 				</svg>
 			);
 		default:
