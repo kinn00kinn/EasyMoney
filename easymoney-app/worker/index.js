@@ -344,7 +344,7 @@ router.patch('/transactions/:id', async (request, env) => {
 });
 
 router.get('/transactions/suggestions', async (_request, env) => {
-	const [accountsRows, categoriesRows, merchantRows] = await Promise.all([
+	const [accountUsageRows, categoryUsageRows, merchantRows, accountLookupRows, categoryLookupRows] = await Promise.all([
 		env.DB.prepare(
 			`SELECT a.id, a.name, a.type, COUNT(t.id) AS usage_count
        FROM accounts a
@@ -374,29 +374,31 @@ router.get('/transactions/suggestions', async (_request, env) => {
        ORDER BY usage_count DESC, MAX(occurred_on) DESC
        LIMIT 6`,
 		).all(),
+		env.DB.prepare(`SELECT id, name, type FROM accounts`).all(),
+		env.DB.prepare(`SELECT id, name FROM categories`).all(),
 	]);
 
-	const accountMap = new Map(accountsRows.results.map((row) => [row.id, row]));
-	const categoryMap = new Map(categoriesRows.results.map((row) => [row.id, row]));
+	const accountMap = new Map(accountLookupRows.results.map((row) => [row.id, row]));
+	const categoryMap = new Map(categoryLookupRows.results.map((row) => [row.id, row]));
 
 	const merchants = merchantRows.results.map((row) => ({
 		description: row.description,
 		usage: row.usage_count,
 		categoryId: row.category_id,
-		categoryName: categoryMap.get(row.category_id)?.name ?? null,
+		categoryName: row.category_id ? categoryMap.get(row.category_id)?.name ?? null : null,
 		accountId: row.account_id,
-		accountName: accountMap.get(row.account_id)?.name ?? null,
-		accountType: accountMap.get(row.account_id)?.type ?? null,
+		accountName: row.account_id ? accountMap.get(row.account_id)?.name ?? null : null,
+		accountType: row.account_id ? accountMap.get(row.account_id)?.type ?? null : null,
 	}));
 
 	return json({
 		data: {
-			accounts: accountsRows.results.map((row) => ({
+			accounts: accountUsageRows.results.map((row) => ({
 				id: row.id,
 				name: row.name,
 				type: row.type,
 			})),
-			categories: categoriesRows.results.map((row) => ({
+			categories: categoryUsageRows.results.map((row) => ({
 				id: row.id,
 				name: row.name,
 			})),

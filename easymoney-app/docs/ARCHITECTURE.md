@@ -40,6 +40,7 @@ Cloudflare Worker (wrangler)
 | `POST /api/transactions` | 手入力取引 → 仕訳を自動生成 |
 | `GET /api/transactions/:id` | 取引詳細 + 仕訳行 |
 | `PATCH /api/transactions/:id` | 取引内容を更新（仕訳も再生成） |
+| `GET /api/transactions/suggestions` | 入力支援の候補 (よく使うお店/カテゴリ/口座) |
 | `GET /api/analytics/summary` | 口座残高と今月の収入/支出 |
 | `GET /api/analytics/monthly` | 過去 12 ヶ月の収支推移 |
 | `GET /api/analytics/categories` | カテゴリ別の集計 |
@@ -47,6 +48,7 @@ Cloudflare Worker (wrangler)
 | `POST /api/imports/paypay` | PayPay銀行 CSV を取り込み (multipart/form-data) |
 | `GET /api/imports/:id` | 取り込み行の確認 |
 | `POST /api/imports/:id/confirm` | 行ごとにカテゴリを割り当てて仕訳化 |
+| `POST /api/demo/seed` | デモデータ投入 (Authorization: Bearer `<DEMO_TOKEN>`) |
 
 レスポンスは `{ data: ... }` or `{ ok: true }` を基本形に統一。
 
@@ -54,6 +56,7 @@ Cloudflare Worker (wrangler)
 
 1. **取引入力**  
    - 金額・日付・内容・口座・カテゴリ・メモの入力フォーム  
+   - よく使うお店/カテゴリ/支払方法のチップでワンタップ入力  
    - 直近 50 件を表示、モバイルでも片手操作できるグリッド
 2. **口座**  
    - 現金/銀行/クレカの残高カード  
