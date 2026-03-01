@@ -92,3 +92,10 @@ npm run seed:demo -- --url=https://<your-worker-domain>/api/demo/seed
 ```
 
 `?reset=true` を付けると既存の取引やインポートを削除してからサンプル（食費/日用品/給与など8件）を挿入します。
+
+### ローカルでの動作確認
+
+1. `.dev.vars` に `DEMO_TOKEN=local-demo` のような値を記載して `npm run dev` を起動します。
+2. 別ターミナルで `export DEMO_TOKEN=local-demo && npm run seed:demo` を実行すると、開発サーバー (`http://127.0.0.1:8787/api/demo/seed`) にデモデータを投入できます。
+
+これで UI を開くだけで最新の取引・サジェスト候補をすぐ確認できます。

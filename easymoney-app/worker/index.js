@@ -1105,6 +1105,13 @@ router.all('*', () => {
 	throw createHttpError(404, 'Not found');
 });
 
+export const __workerTest = {
+	buildEntries,
+	normalizePayPayRow,
+	amountFromCsv,
+	authorizeDemoRequest,
+};
+
 export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
