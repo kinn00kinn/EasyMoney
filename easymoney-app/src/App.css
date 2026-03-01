@@ -218,6 +218,10 @@ td {
 	background: #f8fafc;
 }
 
+.panel table tr[data-editing='true'] {
+	background: #eef2ff;
+}
+
 .align-right {
 	text-align: right;
 }
@@ -317,6 +321,16 @@ td {
 .table-secondary {
 	color: #94a3b8;
 	font-size: 0.85rem;
+}
+
+.category-actions {
+	display: flex;
+	gap: 0.4rem;
+	flex-wrap: wrap;
+}
+
+.category-actions .btn {
+	padding: 0.3rem 0.8rem;
 }
 
 .transaction-detail .detail-summary {

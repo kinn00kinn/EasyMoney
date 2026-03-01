@@ -80,17 +80,23 @@ const baseAccount = z.object({
 	sortOrder: z.number().optional(),
 });
 
+const baseCategory = z.object({
+	name: z.string().min(1),
+	kind: z.enum(['expense', 'income', 'transfer']),
+	color: z.string().optional(),
+});
+
 const accountUpdateInput = baseAccount
 	.partial()
 	.refine((value) => Object.keys(value).length > 0, {
 		message: 'At least one field is required',
 	});
 
-const baseCategory = z.object({
-	name: z.string().min(1),
-	kind: z.enum(['expense', 'income', 'transfer']),
-	color: z.string().optional(),
-});
+const categoryUpdateInput = baseCategory
+	.partial()
+	.refine((value) => Object.keys(value).length > 0, {
+		message: 'At least one field is required',
+	});
 
 const idField = z.string().min(1);
 
@@ -238,13 +244,7 @@ router.get('/categories', async (_request, env) => {
 	).all();
 
 	return json({
-		data: rows.results.map((row) => ({
-			id: row.id,
-			name: row.name,
-			kind: row.kind,
-			color: row.color,
-			total: centsToAmount(row.total_cents),
-		})),
+		data: rows.results.map(mapCategoryRow),
 	});
 });
 
@@ -257,7 +257,7 @@ router.post('/categories', async (request, env) => {
 		`INSERT INTO categories (id, name, kind, color, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
 	)
-		.bind(id, payload.name, payload.kind, payload.color ?? null, now, now)
+		.bind(id, payload.name, payload.kind, normalizeNullableString(payload.color), now, now)
 		.run();
 
 	return json(
@@ -270,6 +270,58 @@ router.post('/categories', async (request, env) => {
 		},
 		{ status: 201 },
 	);
+});
+
+router.patch('/categories/:id', async (request, env) => {
+	const { id } = request.params;
+	const existing = await getCategory(env, id);
+	if (!existing) {
+		throw createHttpError(404, 'Category not found');
+	}
+	const payload = categoryUpdateInput.parse(await parseJsonBody(request));
+
+	const updated = {
+		name: payload.name ?? existing.name,
+		kind: payload.kind ?? existing.kind,
+		color: Object.prototype.hasOwnProperty.call(payload, 'color')
+			? normalizeNullableString(payload.color)
+			: existing.color,
+	};
+
+	await env.DB.prepare(
+		`UPDATE categories
+     SET name = ?, kind = ?, color = ?, updated_at = ?
+     WHERE id = ?`,
+	)
+		.bind(updated.name, updated.kind, updated.color, new Date().toISOString(), id)
+		.run();
+
+	const refreshed = await getCategoryWithTotal(env, id);
+	return json({ data: refreshed });
+});
+
+router.delete('/categories/:id', async (request, env) => {
+	const { id } = request.params;
+	const existing = await getCategory(env, id);
+	if (!existing) {
+		throw createHttpError(404, 'Category not found');
+	}
+
+	const usage = await env.DB.prepare(
+		`SELECT
+        (SELECT COUNT(*) FROM transactions WHERE category_id = ?) AS tx_count,
+        (SELECT COUNT(*) FROM entries WHERE ledger_type = 'category' AND ledger_id = ?) AS entry_count,
+        (SELECT COUNT(*) FROM import_rows WHERE category_id = ?) AS import_row_count`,
+	)
+		.bind(id, id, id)
+		.first();
+
+	if (usage?.tx_count || usage?.entry_count || usage?.import_row_count) {
+		throw createHttpError(400, 'Category cannot be deleted because it is in use');
+	}
+
+	await env.DB.prepare(`DELETE FROM categories WHERE id = ?`).bind(id).run();
+	return json({ ok: true });
 });
 
 router.get('/transactions', async (request, env) => {
@@ -1037,6 +1089,20 @@ const getAccountWithBalance = async (env, id) => {
 	return row ? mapAccountRow(row) : null;
 };
 const getCategory = (env, id) => env.DB.prepare(`SELECT * FROM categories WHERE id = ?`).bind(id).first();
+const getCategoryWithTotal = async (env, id) => {
+	const row = await env.DB.prepare(
+		`SELECT c.*, IFNULL(SUM(
+        CASE WHEN e.side = 'debit' THEN e.amount ELSE -e.amount END
+      ), 0) AS total_cents
+     FROM categories c
+     LEFT JOIN entries e ON e.ledger_type = 'category' AND e.ledger_id = c.id
+     WHERE c.id = ?
+     GROUP BY c.id`,
+	)
+		.bind(id)
+		.first();
+	return row ? mapCategoryRow(row) : null;
+};
 
 const mapAccountRow = (row) => ({
 	id: row.id,
@@ -1045,6 +1111,13 @@ const mapAccountRow = (row) => ({
 	currency: row.currency,
 	note: row.note,
 	balance: centsToAmount(row.balance_cents ?? 0),
+});
+const mapCategoryRow = (row) => ({
+	id: row.id,
+	name: row.name,
+	kind: row.kind,
+	color: row.color,
+	total: centsToAmount(row.total_cents ?? 0),
 });
 
 const fetchTransactionRow = (env, id) =>

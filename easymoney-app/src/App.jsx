@@ -26,6 +26,7 @@ function App() {
 	const [accountForm, setAccountForm] = useState({ name: '', type: 'cash', note: '' });
 	const [editingAccountId, setEditingAccountId] = useState(null);
 	const [categoryForm, setCategoryForm] = useState({ name: '', kind: 'expense' });
+	const [editingCategoryId, setEditingCategoryId] = useState(null);
 	const [selectedTransactionId, setSelectedTransactionId] = useState(null);
 	const [monthFilter, setMonthFilter] = useState(dayjs().format('YYYY-MM'));
 	const queryClient = useQueryClient();
@@ -112,11 +113,36 @@ function App() {
 		},
 	});
 
+	const resetCategoryForm = () => setCategoryForm({ name: '', kind: 'expense' });
+
 	const categoryMutation = useMutation({
 		mutationFn: api.createCategory,
 		onSuccess: () => {
 			invalidate([['categories'], ['analytics-categories']]);
-			setCategoryForm({ name: '', kind: 'expense' });
+			resetCategoryForm();
+		},
+	});
+
+	const categoryUpdateMutation = useMutation({
+		mutationFn: ({ id, data }) => api.updateCategory(id, data),
+		onSuccess: () => {
+			invalidate([['categories'], ['analytics-categories']]);
+			resetCategoryForm();
+			setEditingCategoryId(null);
+		},
+	});
+
+	const categoryDeleteMutation = useMutation({
+		mutationFn: (id) => api.deleteCategory(id),
+		onSuccess: (_data, deletedId) => {
+			invalidate([['categories'], ['analytics-categories']]);
+			setEditingCategoryId((current) => {
+				if (current === deletedId) {
+					resetCategoryForm();
+					return null;
+				}
+				return current;
+			});
 		},
 	});
 
@@ -172,10 +198,36 @@ function App() {
 	const handleCategorySubmit = (event) => {
 		event.preventDefault();
 		if (!categoryForm.name) return;
-		categoryMutation.mutate({
+		const payload = {
 			name: categoryForm.name,
 			kind: categoryForm.kind,
+		};
+		if (editingCategoryId) {
+			categoryUpdateMutation.mutate({ id: editingCategoryId, data: payload });
+		} else {
+			categoryMutation.mutate(payload);
+		}
+	};
+
+	const handleCategoryEdit = (category) => {
+		setEditingCategoryId(category.id);
+		setCategoryForm({
+			name: category.name,
+			kind: category.kind,
 		});
+	};
+
+	const handleCategoryDelete = (category) => {
+		if (categoryDeleteMutation.isPending) return;
+		if (!window.confirm(`${category.name} を削除しますか？このカテゴリを利用中の取引があると削除できません。`)) {
+			return;
+		}
+		categoryDeleteMutation.mutate(category.id);
+	};
+
+	const handleCategoryCancel = () => {
+		setEditingCategoryId(null);
+		resetCategoryForm();
 	};
 
 	const categoryCounts = useMemo(
@@ -320,14 +372,25 @@ function App() {
 								<th>名称</th>
 								<th>区分</th>
 								<th className="align-right">累計</th>
+								<th>操作</th>
 							</tr>
 						</thead>
 						<tbody>
 							{categoryCounts.map((category) => (
-								<tr key={category.id}>
+								<tr key={category.id} data-editing={category.id === editingCategoryId}>
 									<td>{category.name}</td>
 									<td>{category.kind === 'income' ? '収入' : category.kind === 'expense' ? '支出' : '振替'}</td>
 									<td className="align-right">{formatCurrency(category.total)}</td>
+									<td>
+										<div className="category-actions">
+											<button className="btn secondary" type="button" onClick={() => handleCategoryEdit(category)} disabled={categoryUpdateMutation.isPending}>
+												編集
+											</button>
+											<button className="btn danger" type="button" onClick={() => handleCategoryDelete(category)} disabled={categoryDeleteMutation.isPending}>
+												削除
+											</button>
+										</div>
+									</td>
 								</tr>
 							))}
 						</tbody>
@@ -337,12 +400,34 @@ function App() {
 			<form className="panel inline-form" onSubmit={handleCategorySubmit}>
 				<div className="panel-header">
 					<div>
-						<p className="panel-title">カテゴリを追加</p>
+						<p className="panel-title">{editingCategoryId ? 'カテゴリを編集' : 'カテゴリを追加'}</p>
 					</div>
 					<div>
-						<button type="submit" className="btn primary" disabled={categoryMutation.isPending}>
-							追加
+						<button
+							type="submit"
+							className="btn primary"
+							disabled={
+								categoryMutation.isPending || categoryUpdateMutation.isPending || categoryDeleteMutation.isPending
+							}
+						>
+							{editingCategoryId
+								? categoryUpdateMutation.isPending
+									? '更新中…'
+									: '更新'
+								: categoryMutation.isPending
+									? '追加中…'
+									: '追加'}
 						</button>
+						{editingCategoryId ? (
+							<button
+								type="button"
+								className="btn secondary"
+								onClick={handleCategoryCancel}
+								disabled={categoryUpdateMutation.isPending}
+							>
+								キャンセル
+							</button>
+						) : null}
 					</div>
 				</div>
 				<div className="form-grid">
@@ -364,6 +449,8 @@ function App() {
 						</select>
 					</label>
 				</div>
+				{categoryUpdateMutation.isError ? <p className="status">{categoryUpdateMutation.error?.message}</p> : null}
+				{categoryDeleteMutation.isError ? <p className="status">{categoryDeleteMutation.error?.message}</p> : null}
 			</form>
 		</>
 	);

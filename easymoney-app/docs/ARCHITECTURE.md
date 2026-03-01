@@ -38,6 +38,8 @@ Cloudflare Worker (wrangler)
 | `DELETE /api/accounts/:id` | 未使用の口座を削除 |
 | `GET /api/categories` | カテゴリ一覧 + 累計 |
 | `POST /api/categories` | カテゴリ作成 |
+| `PATCH /api/categories/:id` | カテゴリ名称や区分を更新 |
+| `DELETE /api/categories/:id` | 未使用のカテゴリを削除 |
 | `GET /api/transactions?month=YYYY-MM` | 取引一覧 (最新 50件) |
 | `POST /api/transactions` | 手入力取引 → 仕訳を自動生成 |
 | `GET /api/transactions/:id` | 取引詳細 + 仕訳行 |
