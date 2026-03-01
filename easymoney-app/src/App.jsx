@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TransactionForm } from './components/TransactionForm.jsx';
@@ -23,19 +24,20 @@ function App() {
 	const [accountForm, setAccountForm] = useState({ name: '', type: 'cash' });
 	const [categoryForm, setCategoryForm] = useState({ name: '', kind: 'expense' });
 	const [selectedTransactionId, setSelectedTransactionId] = useState(null);
+	const [monthFilter, setMonthFilter] = useState(dayjs().format('YYYY-MM'));
 	const queryClient = useQueryClient();
 
 	const { data: accountsResponse } = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
 	const { data: categoriesResponse } = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
 	const { data: transactionsResponse, isLoading: loadingTransactions } = useQuery({
-		queryKey: ['transactions'],
-		queryFn: () => api.listTransactions({}),
+		queryKey: ['transactions', monthFilter || 'all'],
+		queryFn: () => api.listTransactions({ month: monthFilter || undefined }),
 	});
 	const { data: summaryResponse } = useQuery({ queryKey: ['analytics-summary'], queryFn: api.getAnalyticsSummary });
 	const { data: monthlyResponse } = useQuery({ queryKey: ['analytics-monthly'], queryFn: api.getAnalyticsMonthly });
 	const { data: categoryAnalyticsResponse } = useQuery({
-		queryKey: ['analytics-categories'],
-		queryFn: () => api.getAnalyticsByCategory({}),
+		queryKey: ['analytics-categories', monthFilter || 'all'],
+		queryFn: () => api.getAnalyticsByCategory({ month: monthFilter || undefined }),
 	});
 	const { data: sankeyResponse } = useQuery({ queryKey: ['analytics-sankey'], queryFn: api.getSankey });
 
@@ -55,10 +57,10 @@ function App() {
 
 	const refreshBookkeeping = (transactionId) => {
 		invalidate([
-			['transactions'],
+			['transactions', monthFilter || 'all'],
 			['analytics-summary'],
 			['analytics-monthly'],
-			['analytics-categories'],
+			['analytics-categories', monthFilter || 'all'],
 			['accounts'],
 			transactionId ? ['transaction', transactionId] : null,
 		]);
@@ -124,6 +126,11 @@ function App() {
 		[categories],
 	);
 
+	const handleMonthFilterChange = (value) => {
+		setMonthFilter(value);
+		setSelectedTransactionId(null);
+	};
+
 	const renderTransactions = () => (
 		<>
 			<TransactionForm
@@ -132,6 +139,7 @@ function App() {
 				onSubmit={handleTransactionSubmit}
 				isSubmitting={transactionMutation.isPending}
 			/>
+			<MonthFilterControls value={monthFilter} onChange={handleMonthFilterChange} />
 			{loadingTransactions ? (
 				<p className="status">読み込み中…</p>
 			) : (
@@ -256,7 +264,10 @@ function App() {
 	);
 
 	const renderAnalytics = () => (
-		<AnalyticsPanel summary={summary} monthly={monthly} categories={categoryAnalytics} flows={sankey} />
+		<>
+			<MonthFilterControls value={monthFilter} onChange={handleMonthFilterChange} />
+			<AnalyticsPanel summary={summary} monthly={monthly} categories={categoryAnalytics} flows={sankey} selectedMonth={monthFilter} />
+		</>
 	);
 
 	const renderImport = () => (
@@ -305,3 +316,28 @@ function App() {
 }
 
 export default App;
+
+function MonthFilterControls({ value, onChange }) {
+	const currentMonth = dayjs().format('YYYY-MM');
+	const previousMonth = dayjs().subtract(1, 'month').format('YYYY-MM');
+
+	return (
+		<div className="filter-bar">
+			<label className="field">
+				<span>対象月</span>
+				<input type="month" value={value} onChange={(event) => onChange(event.target.value)} />
+			</label>
+			<div className="filter-actions">
+				<button className="btn secondary" type="button" onClick={() => onChange(currentMonth)}>
+					今月
+				</button>
+				<button className="btn secondary" type="button" onClick={() => onChange(previousMonth)}>
+					先月
+				</button>
+				<button className="btn" type="button" onClick={() => onChange('')} disabled={!value}>
+					クリア
+				</button>
+			</div>
+		</div>
+	);
+}

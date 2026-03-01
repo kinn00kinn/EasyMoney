@@ -158,6 +158,23 @@
 	}
 }
 
+.filter-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 1rem;
+	margin: 1rem 0;
+}
+
+.filter-bar .field {
+	flex: 1;
+}
+
+.filter-actions {
+	display: flex;
+	gap: 0.5rem;
+}
+
 table {
 	width: 100%;
 	border-collapse: collapse;

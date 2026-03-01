@@ -3,7 +3,7 @@ import { formatCurrency } from '../lib/format.js';
 
 const palette = ['#f87171', '#fb923c', '#fbbf24', '#60a5fa', '#a78bfa', '#34d399', '#f472b6', '#2dd4bf'];
 
-export function AnalyticsPanel({ summary, monthly = [], categories = [], flows = [] }) {
+export function AnalyticsPanel({ summary, monthly = [], categories = [], flows = [], selectedMonth }) {
 	const expenseCategories = categories.filter((category) => category.kind === 'expense');
 
 	return (
@@ -57,7 +57,9 @@ export function AnalyticsPanel({ summary, monthly = [], categories = [], flows =
 				<div className="panel-header">
 					<div>
 						<p className="panel-title">カテゴリ別支出</p>
-						<p className="panel-subtitle">最新データから集計</p>
+						<p className="panel-subtitle">
+							{selectedMonth ? `対象月: ${selectedMonth}` : '全期間を集計'}
+						</p>
 					</div>
 				</div>
 				<div className="chart-wrapper">
