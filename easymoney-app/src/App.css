@@ -131,6 +131,11 @@
 	background: #f8fafc;
 }
 
+.account-card[data-editing='true'] {
+	border-color: #6366f1;
+	box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
 .account-name {
 	margin: 0;
 	font-weight: 600;
@@ -146,6 +151,13 @@
 	font-size: 1.3rem;
 	font-weight: 700;
 	margin: 0.4rem 0 0;
+}
+
+.account-card-actions {
+	margin-top: 0.8rem;
+	display: flex;
+	gap: 0.5rem;
+	flex-wrap: wrap;
 }
 
 .table-scroll {
@@ -288,6 +300,10 @@ td {
 .status {
 	color: #2563eb;
 	margin: 0.5rem 0;
+}
+
+.status.error {
+	color: #b91c1c;
 }
 
 .inline-form .form-grid {

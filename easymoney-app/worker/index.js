@@ -13,6 +13,14 @@ const json = (data, init = {}) =>
 		status: init.status ?? 200,
 	});
 
+const jsonDownload = (data, filename) =>
+	new Response(JSON.stringify(data), {
+		headers: {
+			'content-type': 'application/json; charset=utf-8',
+			'content-disposition': `attachment; filename="${filename}"`,
+		},
+	});
+
 const parseJsonBody = async (request) => {
 	const text = await request.text();
 	if (!text) return {};
@@ -27,6 +35,16 @@ const createHttpError = (status = 500, message = 'Unexpected error') => {
 	const error = new Error(message);
 	error.status = status;
 	return error;
+};
+
+const normalizeNullableString = (value) => {
+	if (typeof value !== 'string') return value ?? null;
+	return value.trim().length ? value : null;
+};
+
+const createBackupFilename = (isoString) => {
+	const safeTimestamp = isoString.replace(/[:-]/g, '').replace(/\..+/, '').replace('T', '-');
+	return `easymoney-backup-${safeTimestamp}.json`;
 };
 
 const amountToCents = (value) => {
@@ -61,6 +79,12 @@ const baseAccount = z.object({
 	note: z.string().optional(),
 	sortOrder: z.number().optional(),
 });
+
+const accountUpdateInput = baseAccount
+	.partial()
+	.refine((value) => Object.keys(value).length > 0, {
+		message: 'At least one field is required',
+	});
 
 const baseCategory = z.object({
 	name: z.string().min(1),
@@ -115,14 +139,7 @@ router.get('/accounts', async (_request, env) => {
 	).all();
 
 	return json({
-		data: result.results.map((row) => ({
-			id: row.id,
-			name: row.name,
-			type: row.type,
-			currency: row.currency,
-			note: row.note,
-			balance: centsToAmount(row.balance_cents),
-		})),
+		data: result.results.map(mapAccountRow),
 	});
 });
 
@@ -135,7 +152,7 @@ router.post('/accounts', async (request, env) => {
 		`INSERT INTO accounts (id, name, type, note, sort_order, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
 	)
-		.bind(id, payload.name, payload.type, payload.note ?? null, payload.sortOrder ?? 0, now, now)
+		.bind(id, payload.name, payload.type, normalizeNullableString(payload.note), payload.sortOrder ?? 0, now, now)
 		.run();
 
 	return json(
@@ -151,6 +168,61 @@ router.post('/accounts', async (request, env) => {
 		},
 		{ status: 201 },
 	);
+});
+
+router.patch('/accounts/:id', async (request, env) => {
+	const { id } = request.params;
+	const existing = await getAccount(env, id);
+	if (!existing) {
+		throw createHttpError(404, 'Account not found');
+	}
+	const payload = accountUpdateInput.parse(await parseJsonBody(request));
+
+	const updated = {
+		name: payload.name ?? existing.name,
+		type: payload.type ?? existing.type,
+		note: Object.prototype.hasOwnProperty.call(payload, 'note')
+			? normalizeNullableString(payload.note)
+			: existing.note,
+		sort_order: Object.prototype.hasOwnProperty.call(payload, 'sortOrder')
+			? payload.sortOrder ?? 0
+			: existing.sort_order,
+	};
+
+	await env.DB.prepare(
+		`UPDATE accounts
+     SET name = ?, type = ?, note = ?, sort_order = ?, updated_at = ?
+     WHERE id = ?`,
+	)
+		.bind(updated.name, updated.type, updated.note, updated.sort_order, new Date().toISOString(), id)
+		.run();
+
+	const refreshed = await getAccountWithBalance(env, id);
+	return json({ data: refreshed });
+});
+
+router.delete('/accounts/:id', async (request, env) => {
+	const { id } = request.params;
+	const existing = await getAccount(env, id);
+	if (!existing) {
+		throw createHttpError(404, 'Account not found');
+	}
+
+	const usage = await env.DB.prepare(
+		`SELECT
+        (SELECT COUNT(*) FROM transactions WHERE account_id = ? OR counter_account_id = ?) AS tx_count,
+        (SELECT COUNT(*) FROM entries WHERE ledger_type = 'account' AND ledger_id = ?) AS entry_count,
+        (SELECT COUNT(*) FROM imports WHERE account_id = ?) AS import_count`,
+	)
+		.bind(id, id, id, id)
+		.first();
+
+	if (usage?.tx_count || usage?.entry_count || usage?.import_count) {
+		throw createHttpError(400, 'Account cannot be deleted because it is in use');
+	}
+
+	await env.DB.prepare(`DELETE FROM accounts WHERE id = ?`).bind(id).run();
+	return json({ ok: true });
 });
 
 router.get('/categories', async (_request, env) => {
@@ -894,6 +966,31 @@ router.get('/analytics/sankey', async (_request, env) => {
 	});
 });
 
+router.get('/backup', async (_request, env) => {
+	const [accounts, categories, transactions, entries, imports, importRows] = await Promise.all([
+		env.DB.prepare(`SELECT * FROM accounts ORDER BY created_at`).all(),
+		env.DB.prepare(`SELECT * FROM categories ORDER BY created_at`).all(),
+		env.DB.prepare(`SELECT * FROM transactions ORDER BY occurred_on, created_at`).all(),
+		env.DB.prepare(`SELECT * FROM entries ORDER BY transaction_id, id`).all(),
+		env.DB.prepare(`SELECT * FROM imports ORDER BY created_at`).all(),
+		env.DB.prepare(`SELECT * FROM import_rows ORDER BY created_at`).all(),
+	]);
+
+	const generatedAt = new Date().toISOString();
+	const payload = {
+		version: 1,
+		generatedAt,
+		accounts: accounts.results,
+		categories: categories.results,
+		transactions: transactions.results,
+		entries: entries.results,
+		imports: imports.results,
+		importRows: importRows.results,
+	};
+
+	return jsonDownload(payload, createBackupFilename(generatedAt));
+});
+
 const mapTransactionRow = (row) => ({
 	id: row.id,
 	date: row.occurred_on,
@@ -925,7 +1022,30 @@ const authorizeDemoRequest = (request, env) => {
 };
 
 const getAccount = (env, id) => env.DB.prepare(`SELECT * FROM accounts WHERE id = ?`).bind(id).first();
+const getAccountWithBalance = async (env, id) => {
+	const row = await env.DB.prepare(
+		`SELECT a.*, IFNULL(SUM(
+        CASE WHEN e.side = 'debit' THEN e.amount ELSE -e.amount END
+      ), 0) AS balance_cents
+     FROM accounts a
+     LEFT JOIN entries e ON e.ledger_type = 'account' AND e.ledger_id = a.id
+     WHERE a.id = ?
+     GROUP BY a.id`,
+	)
+		.bind(id)
+		.first();
+	return row ? mapAccountRow(row) : null;
+};
 const getCategory = (env, id) => env.DB.prepare(`SELECT * FROM categories WHERE id = ?`).bind(id).first();
+
+const mapAccountRow = (row) => ({
+	id: row.id,
+	name: row.name,
+	type: row.type,
+	currency: row.currency,
+	note: row.note,
+	balance: centsToAmount(row.balance_cents ?? 0),
+});
 
 const fetchTransactionRow = (env, id) =>
 	env.DB.prepare(
