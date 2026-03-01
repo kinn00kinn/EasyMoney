@@ -1,0 +1,25 @@
+* {
+	box-sizing: border-box;
+}
+
+:root {
+	font-family: 'Noto Sans JP', 'Inter', system-ui, sans-serif;
+	line-height: 1.5;
+	font-weight: 400;
+	color: #0f172a;
+	background-color: #f8fafc;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+body {
+	margin: 0;
+	background-color: #f8fafc;
+	color: #0f172a;
+}
+
+button,
+input,
+select {
+	font: inherit;
+}

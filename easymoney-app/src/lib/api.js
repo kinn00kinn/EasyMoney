@@ -1,0 +1,54 @@
+const withJson = (options = {}) => {
+	const headers = new Headers(options.headers || {});
+	if (!(options.body instanceof FormData)) {
+		headers.set('content-type', 'application/json');
+	}
+	return { ...options, headers };
+};
+
+const handleResponse = async (response) => {
+	if (response.headers.get('content-type')?.includes('application/json')) {
+		const data = await response.json();
+		if (!response.ok) {
+			throw new Error(data.error || 'API Error');
+		}
+		return data;
+	}
+
+	if (!response.ok) {
+		throw new Error('API Error');
+	}
+	return response;
+};
+
+const request = async (path, options = {}) => {
+	const fetchOptions =
+		options.body instanceof FormData ? { ...options } : withJson(options);
+
+	if (fetchOptions.body && !(fetchOptions.body instanceof FormData)) {
+		fetchOptions.body = JSON.stringify(fetchOptions.body);
+	}
+
+	const response = await fetch(`/api${path}`, fetchOptions);
+	return handleResponse(response);
+};
+
+export const api = {
+	listAccounts: () => request('/accounts'),
+	createAccount: (payload) => request('/accounts', { method: 'POST', body: payload }),
+	listCategories: () => request('/categories'),
+	createCategory: (payload) => request('/categories', { method: 'POST', body: payload }),
+	listTransactions: ({ month }) =>
+		request(`/transactions${month ? `?month=${month}` : ''}`),
+	createTransaction: (payload) => request('/transactions', { method: 'POST', body: payload }),
+	getAnalyticsSummary: () => request('/analytics/summary'),
+	getAnalyticsMonthly: () => request('/analytics/monthly'),
+	getAnalyticsByCategory: ({ month }) =>
+		request(`/analytics/categories${month ? `?month=${month}` : ''}`),
+	getSankey: () => request('/analytics/sankey'),
+	uploadPayPay: (formData) =>
+		request('/imports/paypay', { method: 'POST', body: formData }),
+	loadImportRows: (importId) => request(`/imports/${importId}`),
+	confirmImport: (importId, rows) =>
+		request(`/imports/${importId}/confirm`, { method: 'POST', body: { rows } }),
+};
