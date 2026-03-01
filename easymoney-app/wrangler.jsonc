@@ -4,6 +4,7 @@
 	"main": "worker/index.js",
 	"compatibility_date": "2026-03-01",
 	"assets": {
+		"directory": "./dist",
 		"not_found_handling": "single-page-application"
 	},
 	"observability": {
@@ -27,6 +28,6 @@
 		}
 	],
 	"vars": {
-		"DEMO_TOKEN": "__SET_DEMO_TOKEN__"
+		"DEMO_TOKEN": "IEoqIpA8C0EcT+V5QjYZYQ=="
 	}
 }

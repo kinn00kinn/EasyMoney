@@ -36,13 +36,21 @@ Cloudflare Workers + React で構築した、複式簿記ベースの家計簿 W
 
    本番/ステージングでは `--local` を省き、Cloudflare 側の D1 に適用してください。
 
-4. ローカル開発を開始 (Cloudflare 公式 C3 テンプレート準拠)
+4. ローカル開発を開始 (Cloudflare Worker + Vite を同時に起動)
 
    ```bash
    npm run dev
    ```
 
-   `@cloudflare/vite-plugin` が Vite と Worker を統合し、`/api/*` に対するリクエストを Worker に転送します。
+   `wrangler dev --local` が裏側で実行され、`http://127.0.0.1:5173` に Vite、`http://127.0.0.1:8787` に Worker(API) が立ち上がります。  
+   `.dev.vars` に `DEMO_TOKEN` やその他の環境変数を書いておけば自動で読み込まれます。
+
+5. **初回だけ** D1 スキーマを適用 (ローカル)
+
+   ```bash
+   wrangler d1 execute local-easymoney-db --local --file worker/migrations/0001_init.sql
+   wrangler d1 execute local-easymoney-db --local --file worker/migrations/0002_seed.sql
+   ```
 
 ## ビルドとデプロイ
 
@@ -95,7 +103,13 @@ npm run seed:demo -- --url=https://<your-worker-domain>/api/demo/seed
 
 ### ローカルでの動作確認
 
-1. `.dev.vars` に `DEMO_TOKEN=local-demo` のような値を記載して `npm run dev` を起動します。
-2. 別ターミナルで `export DEMO_TOKEN=local-demo && npm run seed:demo` を実行すると、開発サーバー (`http://127.0.0.1:8787/api/demo/seed`) にデモデータを投入できます。
+1. `.dev.vars` に `DEMO_TOKEN=local-demo` のような値を記載して `npm run dev` を起動します。（`wrangler dev --local` が立ち上がり、API は `127.0.0.1:8787` で待ち受けます）
+2. 別ターミナルで `export DEMO_TOKEN=local-demo` した上で、`npm run seed:demo -- --url=http://127.0.0.1:8787/api/demo/seed?reset=true` を実行するとローカル Worker にデモデータを投入できます。
+3. フロントエンド (Vite) は `http://localhost:5173` で確認できます。`/api/*` へのアクセスは 8787 ポートの Worker へプロキシされます。
 
 これで UI を開くだけで最新の取引・サジェスト候補をすぐ確認できます。
+
+### トラブルシューティング
+
+- 500 エラーで Worker が落ちる場合は `wrangler dev` のコンソールに出るスタックトレースを確認し、D1 マイグレーションの適用漏れや `DEMO_TOKEN` の不一致がないかをチェックしてください。
+- `env.DB` バインディングが無い状態で `/api` にアクセスすると「D1 binding is not configured...」というエラーが返ります。`npm run dev` (`wrangler dev --local`) を起動した状態か、本番にデプロイされた Worker に向けてアクセスしてください。

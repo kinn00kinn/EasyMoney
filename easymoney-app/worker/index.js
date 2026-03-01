@@ -18,7 +18,7 @@ const parseJsonBody = async (request) => {
 	if (!text) return {};
 	try {
 		return JSON.parse(text);
-	} catch (error) {
+	} catch {
 		throw createHttpError(400, 'Invalid JSON body');
 	}
 };
@@ -200,7 +200,11 @@ router.post('/categories', async (request, env) => {
 
 router.get('/transactions', async (request, env) => {
 	const url = new URL(request.url);
-	const limit = Number(url.searchParams.get('limit') ?? '50');
+	let limit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10);
+	if (!Number.isFinite(limit) || limit <= 0) {
+		limit = 50;
+	}
+	limit = Math.min(limit, 200);
 	const month = url.searchParams.get('month');
 
 	const conditions = [];
@@ -276,23 +280,46 @@ router.patch('/transactions/:id', async (request, env) => {
 		throw createHttpError(404, 'Account not found');
 	}
 
-	const categoryId = payload.categoryId ?? existing.category_id;
-	const category = categoryId ? await getCategory(env, categoryId) : null;
+	let category = null;
+	const requestedCategoryId = payload.categoryId ?? existing.category_id ?? null;
+	if (requestedCategoryId) {
+		category = await getCategory(env, requestedCategoryId);
+	}
+	let counterAccount = null;
+	if (counterAccountId) {
+		counterAccount = await getAccount(env, counterAccountId);
+		if (!counterAccount) {
+			throw createHttpError(404, 'Counter account not found');
+		}
+		if (counterAccount.id === account.id) {
+			throw createHttpError(400, 'Counter account must be different from account');
+		}
+	}
 
 	let direction = payload.direction ?? null;
 	if (!direction) {
 		if (category) {
 			direction = category.kind === 'income' ? 'income' : category.kind === 'expense' ? 'expense' : 'transfer';
+		} else if (counterAccount) {
+			direction = 'transfer';
 		} else {
 			direction = existing.direction;
 		}
 	}
 
-	if (direction === 'transfer' && !counterAccountId) {
-		throw createHttpError(400, 'Transfer requires counter account');
-	}
-	if (direction !== 'transfer' && !category) {
-		throw createHttpError(400, 'Category is required for this transaction');
+	if (direction === 'transfer') {
+		if (!counterAccount) {
+			throw createHttpError(400, 'Transfer requires counter account');
+		}
+		category = null;
+		categoryId = null;
+	} else {
+		if (!category) {
+			throw createHttpError(400, 'Category is required for this transaction');
+		}
+		if (counterAccount) {
+			throw createHttpError(400, 'Counter account is only allowed for transfer transactions');
+		}
 	}
 
 	const now = new Date().toISOString();
@@ -311,7 +338,7 @@ router.patch('/transactions/:id', async (request, env) => {
 			account.id,
 			category?.id ?? null,
 			paymentMethod,
-			counterAccountId,
+			counterAccount?.id ?? null,
 			now,
 			id,
 		),
@@ -322,7 +349,7 @@ router.patch('/transactions/:id', async (request, env) => {
 			amountCents,
 			accountId: account.id,
 			categoryId: category?.id ?? null,
-			counterAccountId,
+			counterAccountId: counterAccount?.id ?? null,
 		}).map((entry) =>
 			env.DB.prepare(
 				`INSERT INTO entries (id, transaction_id, ledger_type, ledger_id, side, amount)
@@ -643,6 +670,9 @@ router.post('/imports/paypay', async (request, env) => {
 	if (!accountId) {
 		throw createHttpError(400, 'accountId is required');
 	}
+	if (!(await getAccount(env, accountId))) {
+		throw createHttpError(404, 'Account not found');
+	}
 
 	const csvText = await file.text();
 	const parsed = Papa.parse(csvText, {
@@ -920,25 +950,43 @@ const createTransactionRecord = async (env, payload) => {
 	const account = await getAccount(env, payload.accountId);
 	if (!account) throw createHttpError(404, 'Account not found');
 
-	const category = payload.categoryId ? await getCategory(env, payload.categoryId) : null;
+	let counterAccount = null;
+	if (payload.counterAccountId) {
+		counterAccount = await getAccount(env, payload.counterAccountId);
+		if (!counterAccount) {
+			throw createHttpError(404, 'Counter account not found');
+		}
+		if (counterAccount.id === account.id) {
+			throw createHttpError(400, 'Counter account must be different from account');
+		}
+	}
+
+	let category = payload.categoryId ? await getCategory(env, payload.categoryId) : null;
 	let direction = payload.direction;
 	if (!direction) {
 		if (category?.kind === 'income') {
 			direction = 'income';
 		} else if (category?.kind === 'expense') {
 			direction = 'expense';
-		} else if (payload.counterAccountId) {
+		} else if (counterAccount) {
 			direction = 'transfer';
 		} else {
 			direction = 'expense';
 		}
 	}
 
-	if (direction === 'transfer' && !payload.counterAccountId) {
-		throw createHttpError(400, 'Transfer requires counter account');
-	}
-	if (direction !== 'transfer' && !category) {
-		throw createHttpError(400, 'Category is required for this transaction');
+	if (direction === 'transfer') {
+		if (!counterAccount) {
+			throw createHttpError(400, 'Transfer requires counter account');
+		}
+		category = null;
+	} else {
+		if (!category) {
+			throw createHttpError(400, 'Category is required for this transaction');
+		}
+		if (counterAccount) {
+			throw createHttpError(400, 'Counter account is only allowed for transfer transactions');
+		}
 	}
 
 	const transactionId = crypto.randomUUID();
@@ -959,7 +1007,7 @@ const createTransactionRecord = async (env, payload) => {
 			account.id,
 			category?.id ?? null,
 			payload.paymentMethod,
-			payload.counterAccountId ?? null,
+			counterAccount?.id ?? null,
 			payload.source ?? 'manual',
 			now,
 			now,
@@ -970,7 +1018,7 @@ const createTransactionRecord = async (env, payload) => {
 			amountCents,
 			accountId: account.id,
 			categoryId: category?.id ?? null,
-			counterAccountId: payload.counterAccountId ?? null,
+			counterAccountId: counterAccount?.id ?? null,
 		}).map((entry) =>
 			env.DB.prepare(
 				`INSERT INTO entries (id, transaction_id, ledger_type, ledger_id, side, amount)
@@ -989,6 +1037,7 @@ const createTransactionRecord = async (env, payload) => {
 		amount: centsToAmount(amountCents),
 		accountId: account.id,
 		categoryId: category?.id ?? null,
+		counterAccountId: counterAccount?.id ?? null,
 		direction,
 		paymentMethod: payload.paymentMethod,
 		source: payload.source ?? 'manual',
@@ -999,6 +1048,9 @@ const buildEntries = ({ transactionId, direction, amountCents, accountId, catego
 	if (direction === 'transfer') {
 		if (!counterAccountId) {
 			throw createHttpError(400, 'Transfer requires counter account');
+		}
+		if (counterAccountId === accountId) {
+			throw createHttpError(400, 'Transfer requires different accounts');
 		}
 		return [
 			{
@@ -1116,11 +1168,23 @@ export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
 		if (!url.pathname.startsWith('/api')) {
-			return env.ASSETS.fetch(request, env, ctx);
+			const assetFetcher =
+				typeof env.ASSETS?.fetch === 'function'
+					? env.ASSETS.fetch.bind(env.ASSETS)
+					: () => new Response('Not Found', { status: 404 });
+			return assetFetcher(request, env, ctx);
 		}
 
 		try {
-			return await router.handle(request, env, ctx);
+			if (!env.DB) {
+				return json(
+					{
+						error: 'D1 binding is not configured. Start the dev server via `wrangler dev --local` or update wrangler.jsonc.',
+					},
+					{ status: 500 },
+				);
+			}
+			return await router.fetch(request, env, ctx);
 		} catch (error) {
 			console.error('API error', error);
 			const status = error.status || 500;

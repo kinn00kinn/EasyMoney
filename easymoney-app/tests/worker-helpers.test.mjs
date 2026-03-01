@@ -40,6 +40,18 @@ describe('worker helper functions', () => {
 		expect(transfer[1].ledgerId).toBe('acc-cash');
 	});
 
+	it('rejects invalid transfer requests', () => {
+		expect(() =>
+			buildEntries({
+				transactionId: 'txn',
+				direction: 'transfer',
+				amountCents: 1000,
+				accountId: 'acc-one',
+				counterAccountId: 'acc-one',
+			}),
+		).toThrow(/Transfer requires different accounts/);
+	});
+
 	it('normalizes PayPay CSV rows', () => {
 		const row = normalizePayPayRow({
 			入出金日: '2026/03/01',
