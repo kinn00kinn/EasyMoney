@@ -13,12 +13,12 @@ import { formatCurrency } from './lib/format.js';
 import './App.css';
 
 const tabs = [
-	{ id: 'transactions', label: '取引入力' },
-	{ id: 'accounts', label: '口座' },
-	{ id: 'categories', label: 'カテゴリ' },
-	{ id: 'analytics', label: '分析' },
-	{ id: 'import', label: 'CSV取込' },
-	{ id: 'backup', label: 'バックアップ' },
+	{ id: 'transactions', label: '取引入力', description: '仕訳を意識せずに素早く登録します。' },
+	{ id: 'accounts', label: '口座', description: '口座残高と支払い手段を整理します。' },
+	{ id: 'categories', label: 'カテゴリ', description: '費目や区分を整えて入力を効率化します。' },
+	{ id: 'analytics', label: '分析', description: '月次の推移とカテゴリ別の傾向をチェックします。' },
+	{ id: 'import', label: 'CSV取込', description: 'PayPay銀などの CSV を取り込みます。' },
+	{ id: 'backup', label: 'バックアップ', description: 'データを安全にエクスポートします。' },
 ];
 
 function App() {
@@ -54,6 +54,17 @@ function App() {
 	const categoryAnalytics = categoryAnalyticsResponse?.data ?? [];
 	const sankey = sankeyResponse?.data ?? [];
 	const transactionSuggestions = suggestionResponse?.data ?? {};
+	const activeTabMeta = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+	const headerMetrics = [
+		{ label: '今月の収入', value: summary?.month?.income ?? 0, tone: 'positive' },
+		{ label: '今月の支出', value: summary?.month?.expense ?? 0, tone: 'negative' },
+		{
+			label: '今月の差分',
+			value: summary?.month?.net ?? 0,
+			tone: (summary?.month?.net ?? 0) >= 0 ? 'positive' : 'negative',
+		},
+	];
+	const today = dayjs().format('YYYY/MM/DD');
 
 	const invalidate = (keys) => {
 		keys
@@ -492,21 +503,56 @@ function App() {
 	};
 
 	return (
-		<div className="layout">
-			<header className="app-header">
-				<div>
-					<h1>EasyMoney</h1>
-					<p>複式簿記で守る個人用家計簿</p>
+		<div className="app-shell">
+			<aside className="sidebar">
+				<div className="sidebar-brand">
+					<div className="logo-mark">EM</div>
+					<div>
+						<p className="app-name">EasyMoney</p>
+						<p className="sidebar-tagline">複式簿記で守る家計</p>
+					</div>
 				</div>
-			</header>
-			<nav className="tabs">
-				{tabs.map((tab) => (
-					<button key={tab.id} className={tab.id === activeTab ? 'active' : ''} type="button" onClick={() => setActiveTab(tab.id)}>
-						{tab.label}
-					</button>
-				))}
-			</nav>
-			<main className="content">{renderContent()}</main>
+				<nav className="sidebar-nav" aria-label="主要メニュー">
+					{tabs.map((tab) => (
+						<button
+							key={tab.id}
+							className="sidebar-nav-item"
+							type="button"
+							onClick={() => setActiveTab(tab.id)}
+							data-active={tab.id === activeTab}
+							aria-current={tab.id === activeTab ? 'page' : undefined}
+						>
+							<NavIcon id={tab.id} />
+							<div>
+								<span className="nav-label">{tab.label}</span>
+								<span className="nav-description">{tab.description}</span>
+							</div>
+						</button>
+					))}
+				</nav>
+				<div className="sidebar-meta">
+					<p className="sidebar-date">本日 {today}</p>
+					<p className="sidebar-hint">Tab / Enter でメニュー操作できます</p>
+				</div>
+			</aside>
+			<div className="main-area">
+				<header className="app-header">
+					<div>
+						<p className="eyebrow">現在のモード</p>
+						<h1>{activeTabMeta.label}</h1>
+						<p className="app-subtitle">{activeTabMeta.description}</p>
+					</div>
+					<div className="header-metrics">
+						{headerMetrics.map((metric) => (
+							<div key={metric.label} className={`metric-card ${metric.tone}`}>
+								<p className="metric-label">{metric.label}</p>
+								<p className="metric-value">{formatCurrency(metric.value)}</p>
+							</div>
+						))}
+					</div>
+				</header>
+				<main className="content">{renderContent()}</main>
+			</div>
 		</div>
 	);
 }
@@ -536,4 +582,61 @@ function MonthFilterControls({ value, onChange }) {
 			</div>
 		</div>
 	);
+}
+
+function NavIcon({ id }) {
+	switch (id) {
+		case 'transactions':
+			return (
+				<svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<path d="M5 7h14M5 12h10M5 17h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+				</svg>
+			);
+		case 'accounts':
+			return (
+				<svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<rect x="4" y="7" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+					<path d="M15 12h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+				</svg>
+			);
+		case 'categories':
+			return (
+				<svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<rect x="5" y="5" width="6" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.8" />
+					<rect x="13" y="5" width="6" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.8" />
+					<rect x="5" y="13" width="14" height="6" rx="1.2" stroke="currentColor" strokeWidth="1.8" />
+				</svg>
+			);
+		case 'analytics':
+			return (
+				<svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<path d="M6 16V9M12 16V5M18 16v-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+				</svg>
+			);
+		case 'import':
+			return (
+				<svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<path d="M12 5v10m0 0 3.5-3.5M12 15l-3.5-3.5M5 19h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+				</svg>
+			);
+		case 'backup':
+			return (
+				<svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<path
+						d="M7 10a5 5 0 0 1 9.62-1.74A4.5 4.5 0 1 1 17 18H8.5"
+						stroke="currentColor"
+						strokeWidth="1.8"
+						strokeLinecap="round"
+						strokeLinejoin="round"
+					/>
+					<path d="M12 12v6m0 0 2.5-2.5M12 18l-2.5-2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+				</svg>
+			);
+		default:
+			return (
+				<svg className="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<circle cx="12" cy="12" r="5.5" stroke="currentColor" strokeWidth="1.8" />
+				</svg>
+			);
+	}
 }
