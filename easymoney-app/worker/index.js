@@ -68,15 +68,17 @@ const baseCategory = z.object({
 	color: z.string().optional(),
 });
 
+const idField = z.string().min(1);
+
 const transactionInput = z.object({
 	date: z.string().min(8),
 	amount: z.union([z.string(), z.number()]),
 	description: z.string().min(1),
 	memo: z.string().optional(),
-	accountId: z.string().min(1),
-	categoryId: z.string().optional(),
+	accountId: idField,
+	categoryId: idField.nullable().optional(),
 	paymentMethod: z.enum(['cash', 'bank', 'credit']),
-	counterAccountId: z.string().optional(),
+	counterAccountId: idField.nullable().optional(),
 	direction: z.enum(['expense', 'income', 'transfer']).optional(),
 	source: z.string().optional(),
 });
@@ -338,14 +340,16 @@ router.patch('/transactions/:id', async (request, env) => {
 	const memo = payload.memo ?? existing.memo;
 	const paymentMethod = payload.paymentMethod ?? existing.payment_method;
 	const accountId = payload.accountId ?? existing.account_id;
-	const counterAccountId = payload.counterAccountId ?? existing.counter_account_id ?? null;
+	const hasCounterAccountUpdate = Object.prototype.hasOwnProperty.call(payload, 'counterAccountId');
+	const counterAccountId = hasCounterAccountUpdate ? payload.counterAccountId ?? null : existing.counter_account_id ?? null;
 	const account = await getAccount(env, accountId);
 	if (!account) {
 		throw createHttpError(404, 'Account not found');
 	}
 
 	let category = null;
-	const requestedCategoryId = payload.categoryId ?? existing.category_id ?? null;
+	const hasCategoryUpdate = Object.prototype.hasOwnProperty.call(payload, 'categoryId');
+	const requestedCategoryId = hasCategoryUpdate ? payload.categoryId ?? null : existing.category_id ?? null;
 	if (requestedCategoryId) {
 		category = await getCategory(env, requestedCategoryId);
 	}
@@ -376,7 +380,6 @@ router.patch('/transactions/:id', async (request, env) => {
 			throw createHttpError(400, 'Transfer requires counter account');
 		}
 		category = null;
-		categoryId = null;
 	} else {
 		if (!category) {
 			throw createHttpError(400, 'Category is required for this transaction');
@@ -432,6 +435,22 @@ router.patch('/transactions/:id', async (request, env) => {
 			entries,
 		},
 	});
+});
+
+router.delete('/transactions/:id', async (request, env) => {
+	const { id } = request.params;
+	const existing = await env.DB.prepare(`SELECT id FROM transactions WHERE id = ?`).bind(id).first();
+	if (!existing) {
+		throw createHttpError(404, 'Transaction not found');
+	}
+
+	await env.DB.batch([
+		env.DB.prepare(`UPDATE import_rows SET status = 'pending', transaction_id = NULL WHERE transaction_id = ?`).bind(id),
+		env.DB.prepare(`DELETE FROM entries WHERE transaction_id = ?`).bind(id),
+		env.DB.prepare(`DELETE FROM transactions WHERE id = ?`).bind(id),
+	]);
+
+	return json({ ok: true });
 });
 
 

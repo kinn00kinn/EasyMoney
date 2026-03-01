@@ -112,6 +112,12 @@
 	background: #f3f4f6;
 }
 
+.btn.danger {
+	background: #fee2e2;
+	border-color: #fecaca;
+	color: #b91c1c;
+}
+
 .account-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

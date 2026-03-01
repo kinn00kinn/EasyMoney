@@ -160,6 +160,10 @@ function App() {
 							categories={categories}
 							onClose={() => setSelectedTransactionId(null)}
 							onUpdated={(id) => refreshBookkeeping(id)}
+							onDeleted={() => {
+								setSelectedTransactionId(null);
+								refreshBookkeeping();
+							}}
 						/>
 					) : null}
 				</div>

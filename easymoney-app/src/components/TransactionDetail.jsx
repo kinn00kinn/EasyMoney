@@ -14,7 +14,7 @@ const defaultForm = {
 	paymentMethod: 'cash',
 };
 
-export function TransactionDetail({ transactionId, accounts = [], categories = [], onClose, onUpdated }) {
+export function TransactionDetail({ transactionId, accounts = [], categories = [], onClose, onUpdated, onDeleted }) {
 	const queryClient = useQueryClient();
 	const [form, setForm] = useState(defaultForm);
 
@@ -41,11 +41,18 @@ export function TransactionDetail({ transactionId, accounts = [], categories = [
 		}
 	}, [transactionId, transaction]);
 
-	const mutation = useMutation({
+	const updateMutation = useMutation({
 		mutationFn: (payload) => api.updateTransaction(transactionId, payload),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['transaction', transactionId] });
 			onUpdated?.(transactionId);
+		},
+	});
+	const deleteMutation = useMutation({
+		mutationFn: () => api.deleteTransaction(transactionId),
+		onSuccess: () => {
+			queryClient.removeQueries({ queryKey: ['transaction', transactionId] });
+			onDeleted?.(transactionId);
 		},
 	});
 
@@ -67,12 +74,20 @@ export function TransactionDetail({ transactionId, accounts = [], categories = [
 	const handleSubmit = (event) => {
 		event.preventDefault();
 		if (!form) return;
-		mutation.mutate({
+		updateMutation.mutate({
 			...form,
 			amount: Number(form.amount),
-			categoryId: form.categoryId || undefined,
-			counterAccountId: form.counterAccountId || undefined,
+			categoryId: form.categoryId || null,
+			counterAccountId: form.counterAccountId || null,
 		});
+	};
+
+	const handleDelete = () => {
+		if (!transactionId || deleteMutation.isPending) return;
+		if (!window.confirm('この取引を削除しますか？この操作は取り消せません。')) {
+			return;
+		}
+		deleteMutation.mutate();
 	};
 
 	return (
@@ -198,12 +213,16 @@ export function TransactionDetail({ transactionId, accounts = [], categories = [
 							</label>
 						</div>
 						<div className="detail-actions">
-							<button className="btn primary" type="submit" disabled={mutation.isPending}>
-								{mutation.isPending ? '更新中…' : '更新する'}
+							<button className="btn danger" type="button" onClick={handleDelete} disabled={deleteMutation.isPending}>
+								{deleteMutation.isPending ? '削除中…' : '削除'}
+							</button>
+							<button className="btn primary" type="submit" disabled={updateMutation.isPending}>
+								{updateMutation.isPending ? '更新中…' : '更新する'}
 							</button>
 						</div>
-						{mutation.isError ? <p className="status">{mutation.error?.message}</p> : null}
-						{mutation.isSuccess ? <p className="status">更新しました</p> : null}
+						{updateMutation.isError ? <p className="status">{updateMutation.error?.message}</p> : null}
+						{updateMutation.isSuccess ? <p className="status">更新しました</p> : null}
+						{deleteMutation.isError ? <p className="status">{deleteMutation.error?.message}</p> : null}
 					</form>
 				</>
 			) : (
