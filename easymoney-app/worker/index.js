@@ -244,6 +244,70 @@ router.post('/transactions', async (request, env) => {
 	return json({ data: result }, { status: 201 });
 });
 
+router.get('/transactions/suggestions', async (_request, env) => {
+	const [accountUsageRows, categoryUsageRows, merchantRows, accountLookupRows, categoryLookupRows] = await Promise.all([
+		env.DB.prepare(
+			`SELECT a.id, a.name, a.type, COUNT(t.id) AS usage_count
+       FROM accounts a
+       LEFT JOIN transactions t ON t.account_id = a.id
+       GROUP BY a.id
+       HAVING usage_count > 0
+       ORDER BY usage_count DESC
+       LIMIT 5`,
+		).all(),
+		env.DB.prepare(
+			`SELECT c.id, c.name, COUNT(t.id) AS usage_count
+       FROM categories c
+       LEFT JOIN transactions t ON t.category_id = c.id
+       WHERE t.id IS NOT NULL
+       GROUP BY c.id
+       ORDER BY usage_count DESC
+       LIMIT 6`,
+		).all(),
+		env.DB.prepare(
+			`SELECT description,
+        COUNT(*) AS usage_count,
+        MAX(category_id) AS category_id,
+        MAX(account_id) AS account_id
+       FROM transactions
+       WHERE description IS NOT NULL AND TRIM(description) != ''
+       GROUP BY description
+       ORDER BY usage_count DESC, MAX(occurred_on) DESC
+       LIMIT 6`,
+		).all(),
+		env.DB.prepare(`SELECT id, name, type FROM accounts`).all(),
+		env.DB.prepare(`SELECT id, name FROM categories`).all(),
+	]);
+
+	const accountMap = new Map(accountLookupRows.results.map((row) => [row.id, row]));
+	const categoryMap = new Map(categoryLookupRows.results.map((row) => [row.id, row]));
+
+	const merchants = merchantRows.results.map((row) => ({
+		description: row.description,
+		usage: row.usage_count,
+		categoryId: row.category_id,
+		categoryName: row.category_id ? categoryMap.get(row.category_id)?.name ?? null : null,
+		accountId: row.account_id,
+		accountName: row.account_id ? accountMap.get(row.account_id)?.name ?? null : null,
+		accountType: row.account_id ? accountMap.get(row.account_id)?.type ?? null : null,
+	}));
+
+	return json({
+		data: {
+			accounts: accountUsageRows.results.map((row) => ({
+				id: row.id,
+				name: row.name,
+				type: row.type,
+			})),
+			categories: categoryUsageRows.results.map((row) => ({
+				id: row.id,
+				name: row.name,
+			})),
+			merchants,
+		},
+	});
+});
+
 router.get('/transactions/:id', async (request, env) => {
 	const { id } = request.params;
 	const row = await fetchTransactionRow(env, id);
@@ -370,69 +434,6 @@ router.patch('/transactions/:id', async (request, env) => {
 	});
 });
 
-router.get('/transactions/suggestions', async (_request, env) => {
-	const [accountUsageRows, categoryUsageRows, merchantRows, accountLookupRows, categoryLookupRows] = await Promise.all([
-		env.DB.prepare(
-			`SELECT a.id, a.name, a.type, COUNT(t.id) AS usage_count
-       FROM accounts a
-       LEFT JOIN transactions t ON t.account_id = a.id
-       GROUP BY a.id
-       HAVING usage_count > 0
-       ORDER BY usage_count DESC
-       LIMIT 5`,
-		).all(),
-		env.DB.prepare(
-			`SELECT c.id, c.name, COUNT(t.id) AS usage_count
-       FROM categories c
-       LEFT JOIN transactions t ON t.category_id = c.id
-       WHERE t.id IS NOT NULL
-       GROUP BY c.id
-       ORDER BY usage_count DESC
-       LIMIT 6`,
-		).all(),
-		env.DB.prepare(
-			`SELECT description,
-        COUNT(*) AS usage_count,
-        MAX(category_id) AS category_id,
-        MAX(account_id) AS account_id
-       FROM transactions
-       WHERE description IS NOT NULL AND TRIM(description) != ''
-       GROUP BY description
-       ORDER BY usage_count DESC, MAX(occurred_on) DESC
-       LIMIT 6`,
-		).all(),
-		env.DB.prepare(`SELECT id, name, type FROM accounts`).all(),
-		env.DB.prepare(`SELECT id, name FROM categories`).all(),
-	]);
-
-	const accountMap = new Map(accountLookupRows.results.map((row) => [row.id, row]));
-	const categoryMap = new Map(categoryLookupRows.results.map((row) => [row.id, row]));
-
-	const merchants = merchantRows.results.map((row) => ({
-		description: row.description,
-		usage: row.usage_count,
-		categoryId: row.category_id,
-		categoryName: row.category_id ? categoryMap.get(row.category_id)?.name ?? null : null,
-		accountId: row.account_id,
-		accountName: row.account_id ? accountMap.get(row.account_id)?.name ?? null : null,
-		accountType: row.account_id ? accountMap.get(row.account_id)?.type ?? null : null,
-	}));
-
-	return json({
-		data: {
-			accounts: accountUsageRows.results.map((row) => ({
-				id: row.id,
-				name: row.name,
-				type: row.type,
-			})),
-			categories: categoryUsageRows.results.map((row) => ({
-				id: row.id,
-				name: row.name,
-			})),
-			merchants,
-		},
-	});
-});
 
 router.post('/demo/seed', async (request, env) => {
 	authorizeDemoRequest(request, env);
