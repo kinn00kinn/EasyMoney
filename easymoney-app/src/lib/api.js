@@ -50,11 +50,11 @@ export const api = {
 	updateTransaction: (id, payload) => request(`/transactions/${id}`, { method: 'PATCH', body: payload }),
 	deleteTransaction: (id) => request(`/transactions/${id}`, { method: 'DELETE' }),
 	getTransactionSuggestions: () => request('/transactions/suggestions'),
-	getAnalyticsSummary: () => request('/analytics/summary'),
+	getAnalyticsSummary: ({ month }) => request(`/analytics/summary${month ? `?month=${month}` : ''}`),
 	getAnalyticsMonthly: () => request('/analytics/monthly'),
 	getAnalyticsByCategory: ({ month }) =>
 		request(`/analytics/categories${month ? `?month=${month}` : ''}`),
-	getSankey: () => request('/analytics/sankey'),
+	getAnalyticsFlows: ({ month }) => request(`/analytics/flows${month ? `?month=${month}` : ''}`),
 	uploadPayPay: (formData) =>
 		request('/imports/paypay', { method: 'POST', body: formData }),
 	loadImportRows: (importId) => request(`/imports/${importId}`),
@@ -67,4 +67,5 @@ export const api = {
 		}
 		return response;
 	},
+	restoreBackup: (payload) => request('/backup', { method: 'POST', body: payload }),
 };

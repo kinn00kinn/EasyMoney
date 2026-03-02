@@ -631,7 +631,13 @@ router.post('/demo/seed', async (request, env) => {
 	});
 });
 
-router.get('/analytics/summary', async (_request, env) => {
+router.get('/analytics/summary', async (request, env) => {
+	const url = new URL(request.url);
+	const monthParam = url.searchParams.get('month');
+	const nowMonth = new Date().toISOString().slice(0, 7);
+	const includeAll = monthParam === 'all';
+	const targetMonth = includeAll ? null : monthParam || nowMonth;
+
 	const [accounts, monthTotals] = await Promise.all([
 		env.DB.prepare(
 			`SELECT a.id, a.name, a.type, IFNULL(SUM(CASE WHEN e.side = 'debit' THEN e.amount ELSE -e.amount END), 0) AS balance
@@ -642,10 +648,7 @@ router.get('/analytics/summary', async (_request, env) => {
        ORDER BY a.sort_order, a.created_at`,
 		).all(),
 		env.DB.prepare(
-			`WITH current_month AS (
-          SELECT substr(datetime('now'), 1, 7) AS month_key
-        )
-        SELECT
+			`SELECT
           SUM(CASE WHEN c.kind = 'income' AND e.side = 'credit' THEN e.amount
                    WHEN c.kind = 'income' AND e.side = 'debit' THEN -e.amount ELSE 0 END) AS income,
           SUM(CASE WHEN c.kind = 'expense' AND e.side = 'debit' THEN e.amount
@@ -653,12 +656,15 @@ router.get('/analytics/summary', async (_request, env) => {
         FROM entries e
         INNER JOIN transactions t ON t.id = e.transaction_id
         INNER JOIN categories c ON c.id = e.ledger_id AND e.ledger_type = 'category'
-        WHERE substr(t.occurred_on, 1, 7) = substr(datetime('now'), 1, 7)`,
-		).first(),
+        ${includeAll ? '' : 'WHERE substr(t.occurred_on, 1, 7) = ?'}`,
+		)
+			.bind(...(includeAll ? [] : [targetMonth]))
+			.first(),
 	]);
 
 	return json({
 		data: {
+			period: includeAll ? 'all' : targetMonth,
 			accounts: accounts.results.map((row) => ({
 				id: row.id,
 				name: row.name,
@@ -707,7 +713,7 @@ router.get('/analytics/categories', async (request, env) => {
 	const params = [];
 	let condition = '';
 
-	if (month) {
+	if (month && month !== 'all') {
 		condition = 'WHERE substr(t.occurred_on, 1, 7) = ?';
 		params.push(month);
 	}
@@ -933,24 +939,59 @@ router.post('/imports/:id/confirm', async (request, env) => {
 	return json({ ok: true });
 });
 
-router.get('/analytics/sankey', async (_request, env) => {
-	const rows = await env.DB.prepare(
+router.get('/analytics/flows', async (request, env) => {
+	const url = new URL(request.url);
+	const month = url.searchParams.get('month');
+	const params = [];
+	const conditions = [];
+
+	if (month && month !== 'all') {
+		conditions.push("substr(t.occurred_on, 1, 7) = ?");
+		params.push(month);
+	}
+
+	const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+	const flows = await env.DB.prepare(
 		`SELECT c.name AS category_name, a.name AS account_name, SUM(t.amount) AS total
        FROM transactions t
        INNER JOIN categories c ON c.id = t.category_id
        INNER JOIN accounts a ON a.id = t.account_id
-       WHERE t.direction = 'expense'
+       ${whereClause ? `${whereClause} AND t.direction = 'expense'` : 'WHERE t.direction = \'expense\''}
        GROUP BY c.name, a.name
        ORDER BY total DESC
-       LIMIT 20`,
-	).all();
+       LIMIT 25`,
+	)
+		.bind(...params)
+		.all();
+
+	const paymentStats = await env.DB.prepare(
+		`SELECT a.id, a.name, a.type,
+        SUM(CASE WHEN t.direction = 'income' THEN t.amount ELSE 0 END) AS income_total,
+        SUM(CASE WHEN t.direction = 'expense' THEN t.amount ELSE 0 END) AS expense_total
+       FROM transactions t
+       INNER JOIN accounts a ON a.id = t.account_id
+       ${whereClause}
+       GROUP BY a.id, a.name, a.type
+       ORDER BY expense_total DESC, income_total DESC`,
+	)
+		.bind(...params)
+		.all();
 
 	return json({
-		data: rows.results.map((row) => ({
-			source: row.account_name,
-			target: row.category_name,
-			value: centsToAmount(row.total ?? 0),
-		})),
+		data: {
+			flows: flows.results.map((row) => ({
+				source: row.account_name,
+				target: row.category_name,
+				value: centsToAmount(row.total ?? 0),
+			})),
+			paymentMethods: paymentStats.results.map((row) => ({
+				id: row.id,
+				name: row.name,
+				type: row.type,
+				income: centsToAmount(row.income_total ?? 0),
+				expense: centsToAmount(Math.abs(row.expense_total ?? 0)),
+			})),
+		},
 	});
 });
 
@@ -977,6 +1018,161 @@ router.get('/backup', async (_request, env) => {
 	};
 
 	return jsonDownload(payload, createBackupFilename(generatedAt));
+});
+
+router.post('/backup', async (request, env) => {
+	const payload = await parseJsonBody(request);
+	if (!payload || typeof payload !== 'object') {
+		throw createHttpError(400, 'Backup payload is required');
+	}
+	const {
+		accounts = [],
+		categories = [],
+		transactions = [],
+		entries = [],
+		imports = [],
+		importRows = [],
+	} = payload;
+
+	await env.DB.batch([
+		env.DB.prepare('DELETE FROM entries'),
+		env.DB.prepare('DELETE FROM transactions'),
+		env.DB.prepare('DELETE FROM import_rows'),
+		env.DB.prepare('DELETE FROM imports'),
+		env.DB.prepare('DELETE FROM categories'),
+		env.DB.prepare('DELETE FROM accounts'),
+	]);
+
+	const statements = [];
+	for (const row of accounts) {
+		statements.push(
+			env.DB.prepare(
+				`INSERT INTO accounts (id, name, type, currency, note, sort_order, is_archived, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				row.id,
+				row.name,
+				row.type,
+				row.currency ?? 'JPY',
+				row.note ?? null,
+				row.sort_order ?? 0,
+				row.is_archived ?? 0,
+				row.created_at ?? new Date().toISOString(),
+				row.updated_at ?? new Date().toISOString(),
+			),
+		);
+	}
+	for (const row of categories) {
+		statements.push(
+			env.DB.prepare(
+				`INSERT INTO categories (id, name, kind, color, is_archived, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				row.id,
+				row.name,
+				row.kind,
+				row.color ?? null,
+				row.is_archived ?? 0,
+				row.created_at ?? new Date().toISOString(),
+				row.updated_at ?? new Date().toISOString(),
+			),
+		);
+	}
+	for (const row of transactions) {
+		statements.push(
+			env.DB.prepare(
+				`INSERT INTO transactions (
+          id, occurred_on, direction, description, memo, amount,
+          account_id, category_id, payment_method, counter_account_id, source, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				row.id,
+				row.occurred_on,
+				row.direction,
+				row.description,
+				row.memo ?? null,
+				row.amount,
+				row.account_id,
+				row.category_id ?? null,
+				row.payment_method,
+				row.counter_account_id ?? null,
+				row.source ?? 'manual',
+				row.created_at ?? new Date().toISOString(),
+				row.updated_at ?? new Date().toISOString(),
+			),
+		);
+	}
+	for (const row of entries) {
+		statements.push(
+			env.DB.prepare(
+				`INSERT INTO entries (id, transaction_id, ledger_type, ledger_id, side, amount, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				row.id,
+				row.transaction_id,
+				row.ledger_type,
+				row.ledger_id,
+				row.side,
+				row.amount,
+				row.created_at ?? new Date().toISOString(),
+			),
+		);
+	}
+	for (const row of imports) {
+		statements.push(
+			env.DB.prepare(
+				`INSERT INTO imports (id, provider, account_id, original_filename, status, rows_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				row.id,
+				row.provider,
+				row.account_id,
+				row.original_filename ?? null,
+				row.status ?? 'draft',
+				row.rows_count ?? 0,
+				row.created_at ?? new Date().toISOString(),
+			),
+		);
+	}
+	for (const row of importRows) {
+		statements.push(
+			env.DB.prepare(
+				`INSERT INTO import_rows (
+          id, import_id, raw_payload, occurred_on, description, memo, amount, flow, status,
+          category_id, transaction_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				row.id,
+				row.import_id,
+				row.raw_payload ?? '{}',
+				row.occurred_on,
+				row.description,
+				row.memo ?? null,
+				row.amount,
+				row.flow,
+				row.status ?? 'pending',
+				row.category_id ?? null,
+				row.transaction_id ?? null,
+				row.created_at ?? new Date().toISOString(),
+			),
+		);
+	}
+
+	if (statements.length) {
+		await env.DB.batch(statements);
+	}
+
+	return json({
+		ok: true,
+		counts: {
+			accounts: accounts.length,
+			categories: categories.length,
+			transactions: transactions.length,
+			entries: entries.length,
+			imports: imports.length,
+			importRows: importRows.length,
+		},
+	});
 });
 
 const mapTransactionRow = (row) => ({

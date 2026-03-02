@@ -52,6 +52,7 @@ function App() {
 	const [editingCategoryId, setEditingCategoryId] = useState(null);
 	const [selectedTransactionId, setSelectedTransactionId] = useState(null);
 	const [monthFilter, setMonthFilter] = useState(dayjs().format('YYYY-MM'));
+	const [analyticsMonth, setAnalyticsMonth] = useState(dayjs().format('YYYY-MM'));
 	const [listEditMode, setListEditMode] = useState(false);
 	const [bulkSelection, setBulkSelection] = useState([]);
 	const [bulkError, setBulkError] = useState('');
@@ -64,13 +65,20 @@ function App() {
 		queryKey: ['transactions', monthFilter || 'all'],
 		queryFn: () => api.listTransactions({ month: monthFilter || undefined }),
 	});
-	const { data: summaryResponse } = useQuery({ queryKey: ['analytics-summary'], queryFn: api.getAnalyticsSummary });
+	const analyticsSummaryKey = analyticsMonth ? ['analytics-summary', analyticsMonth] : ['analytics-summary', 'current'];
+	const { data: summaryResponse } = useQuery({
+		queryKey: analyticsSummaryKey,
+		queryFn: () => api.getAnalyticsSummary({ month: analyticsMonth === 'all' ? 'all' : analyticsMonth || undefined }),
+	});
 	const { data: monthlyResponse } = useQuery({ queryKey: ['analytics-monthly'], queryFn: api.getAnalyticsMonthly });
 	const { data: categoryAnalyticsResponse } = useQuery({
-		queryKey: ['analytics-categories', monthFilter || 'all'],
-		queryFn: () => api.getAnalyticsByCategory({ month: monthFilter || undefined }),
+		queryKey: ['analytics-categories', analyticsMonth || 'current'],
+		queryFn: () => api.getAnalyticsByCategory({ month: analyticsMonth === 'all' ? 'all' : analyticsMonth || undefined }),
 	});
-	const { data: sankeyResponse } = useQuery({ queryKey: ['analytics-sankey'], queryFn: api.getSankey });
+	const { data: flowsResponse } = useQuery({
+		queryKey: ['analytics-flows', analyticsMonth || 'current'],
+		queryFn: () => api.getAnalyticsFlows({ month: analyticsMonth === 'all' ? 'all' : analyticsMonth || undefined }),
+	});
 	const { data: suggestionResponse } = useQuery({ queryKey: ['transaction-suggestions'], queryFn: api.getTransactionSuggestions });
 
 	const accounts = accountsResponse?.data ?? [];
@@ -79,7 +87,7 @@ function App() {
 	const summary = summaryResponse?.data;
 	const monthly = monthlyResponse?.data ?? [];
 	const categoryAnalytics = categoryAnalyticsResponse?.data ?? [];
-	const sankey = sankeyResponse?.data ?? [];
+	const flows = flowsResponse?.data ?? { flows: [], paymentMethods: [] };
 	const transactionSuggestions = suggestionResponse?.data ?? {};
 	const activeTabMeta = tabs.find((t) => t.id === activeTab) ?? tabs[0];
 
@@ -254,6 +262,9 @@ function App() {
 		setSelectedTransactionId(null);
 		setBulkSelection([]);
 	};
+	const handleAnalyticsMonthChange = (value) => {
+		setAnalyticsMonth(value);
+	};
 
 	const isMobile = useIsMobile();
 
@@ -398,10 +409,15 @@ function App() {
 	);
 
 	const renderAnalytics = () => (
-		<>
-			<MonthFilterControls value={monthFilter} onChange={handleMonthFilterChange} />
-			<AnalyticsPanel summary={summary} monthly={monthly} categories={categoryAnalytics} flows={sankey} selectedMonth={monthFilter} />
-		</>
+		<AnalyticsPanel
+			summary={summary}
+			monthly={monthly}
+			categories={categoryAnalytics}
+			flows={flows}
+			selectedMonth={analyticsMonth}
+			onSelectMonth={handleAnalyticsMonthChange}
+			availableMonths={monthly.map((row) => row.month)}
+		/>
 	);
 
 	const renderContent = () => {
