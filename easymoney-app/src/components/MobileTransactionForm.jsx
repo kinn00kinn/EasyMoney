@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { today } from '../lib/format.js';
 
 const createInitialState = () => ({
@@ -9,6 +9,8 @@ const createInitialState = () => ({
     accountId: '',
     categoryId: '',
     paymentMethod: 'cash',
+    direction: 'expense',
+    counterAccountId: '',
 });
 
 /**
@@ -41,7 +43,7 @@ export function MobileTransactionForm({ accounts = [], categories = [], onSubmit
     const merchantSuggestions = suggestions.merchants ?? [];
     const categorySuggestions = suggestions.categories ?? [];
     const accountSuggestions = suggestions.accounts ?? [];
-
+    const categoryMap = useMemo(() => new Map(categories.map((category) => [category.id, category.kind])), [categories]);
     // auto-focus amount on mount
     useEffect(() => {
         const timer = setTimeout(() => amountRef.current?.focus(), 300);
@@ -49,21 +51,79 @@ export function MobileTransactionForm({ accounts = [], categories = [], onSubmit
     }, []);
 
     const set = (key, value) => setForm((p) => ({ ...p, [key]: value }));
+    const resetForm = () => {
+        setForm(createInitialState());
+        setShowDetail(false);
+    };
 
-    const handleSubmit = () => {
-        if (!form.accountId || !form.categoryId || !form.amount) return;
-        onSubmit(form, () => {
-            setForm(createInitialState());
-            setShowDetail(false);
+    const handleDirectionChange = (direction) => {
+        setForm((prev) => {
+            if (direction === 'transfer') {
+                return { ...prev, direction, categoryId: '', counterAccountId: '' };
+            }
+            const targetKind = direction === 'income' ? 'income' : 'expense';
+            const defaultCategoryId = categories.find((category) => category.kind === targetKind)?.id ?? '';
+            return {
+                ...prev,
+                direction,
+                categoryId: defaultCategoryId,
+                counterAccountId: '',
+            };
         });
     };
 
+    const handleSubmit = () => {
+        if (!form.accountId || !form.amount || !form.description) return;
+        if (form.direction === 'transfer') {
+            if (!form.counterAccountId) return;
+        } else if (!form.categoryId) {
+            return;
+        }
+        const payload = {
+            ...form,
+            categoryId: form.direction === 'transfer' ? null : form.categoryId,
+            counterAccountId: form.direction === 'transfer' ? form.counterAccountId : null,
+        };
+        onSubmit(payload, resetForm);
+    };
+
     const applyMerchant = (m) => {
-        setForm((p) => ({
-            ...p,
-            description: m.description,
-            categoryId: m.categoryId ?? p.categoryId,
-            accountId: m.accountId ?? p.accountId,
+        const categoryKind = m.categoryId ? categoryMap.get(m.categoryId) : null;
+        const inferredDirection =
+            categoryKind === 'income' ? 'income' : categoryKind === 'expense' ? 'expense' : form.direction;
+        setForm((prev) => {
+            const nextDirection = inferredDirection ?? prev.direction;
+            const isTransfer = nextDirection === 'transfer';
+            const directionKind = nextDirection === 'income' ? 'income' : 'expense';
+            const merchantCategoryValid =
+                !isTransfer && m.categoryId && categoryMap.get(m.categoryId) === directionKind;
+            const account = m.accountId ? accounts.find((acc) => acc.id === m.accountId) : null;
+            return {
+                ...prev,
+                description: m.description,
+                direction: nextDirection,
+                categoryId: merchantCategoryValid ? m.categoryId : isTransfer ? '' : prev.categoryId,
+                counterAccountId: isTransfer ? '' : prev.counterAccountId,
+                accountId: m.accountId ?? prev.accountId,
+                paymentMethod: account?.type ?? m.accountType ?? prev.paymentMethod,
+            };
+        });
+    };
+
+    const pickAccount = (accountId, accountType) => {
+        setForm((prev) => ({
+            ...prev,
+            accountId,
+            paymentMethod: accountType ?? prev.paymentMethod,
+            counterAccountId: prev.counterAccountId === accountId ? '' : prev.counterAccountId,
+        }));
+    };
+
+    const pickCounterAccount = (accountId) => {
+        if (accountId === form.accountId) return;
+        setForm((prev) => ({
+            ...prev,
+            counterAccountId: prev.counterAccountId === accountId ? '' : accountId,
         }));
     };
 
@@ -71,7 +131,9 @@ export function MobileTransactionForm({ accounts = [], categories = [], onSubmit
         ? Number(form.amount).toLocaleString('ja-JP')
         : '';
 
-    const canSubmit = form.accountId && form.categoryId && form.amount && form.description;
+    const hasRequiredCategory = form.direction === 'transfer' ? true : Boolean(form.categoryId);
+    const hasCounter = form.direction === 'transfer' ? Boolean(form.counterAccountId) : true;
+    const canSubmit = Boolean(form.accountId && form.amount && form.description && hasRequiredCategory && hasCounter);
 
     // Split categories into suggested (first) and others
     const suggestedCatIds = new Set(categorySuggestions.map((c) => c.id));
@@ -89,6 +151,18 @@ export function MobileTransactionForm({ accounts = [], categories = [], onSubmit
 
     return (
         <div className="mf">
+            <div className="mf-mode-toggle">
+                {['expense', 'income', 'transfer'].map((mode) => (
+                    <button
+                        key={mode}
+                        type="button"
+                        className={form.direction === mode ? 'active' : ''}
+                        onClick={() => handleDirectionChange(mode)}
+                    >
+                        {mode === 'expense' ? '支出' : mode === 'income' ? '収入' : '振替'}
+                    </button>
+                ))}
+            </div>
             {/* ── Row 1: Date chip ── */}
             <div className="mf-topbar">
                 <input
@@ -148,21 +222,25 @@ export function MobileTransactionForm({ accounts = [], categories = [], onSubmit
             </div>
 
             {/* ── Category grid ── */}
-            <div className="mf-section">
-                <p className="mf-label">カテゴリ</p>
-                <div className="mf-cat-grid">
-                    {sortedCategories.map((c) => (
-                        <button
-                            key={c.id}
-                            type="button"
-                            className={`mf-cat-chip ${form.categoryId === c.id ? 'active' : ''}`}
-                            onClick={() => set('categoryId', c.id)}
-                        >
-                            {c.name}
-                        </button>
-                    ))}
+            {form.direction !== 'transfer' && (
+                <div className="mf-section">
+                    <p className="mf-label">カテゴリ</p>
+                    <div className="mf-cat-grid">
+                        {sortedCategories
+                            .filter((c) => c.kind === (form.direction === 'income' ? 'income' : 'expense'))
+                            .map((c) => (
+                                <button
+                                    key={c.id}
+                                    type="button"
+                                    className={`mf-cat-chip ${form.categoryId === c.id ? 'active' : ''}`}
+                                    onClick={() => set('categoryId', c.id)}
+                                >
+                                    {c.name}
+                                </button>
+                            ))}
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* ── Account pills ── */}
             <div className="mf-section">
@@ -173,13 +251,33 @@ export function MobileTransactionForm({ accounts = [], categories = [], onSubmit
                             key={a.id}
                             type="button"
                             className={`mf-acc-pill ${form.accountId === a.id ? 'active' : ''}`}
-                            onClick={() => set('accountId', a.id)}
+                            onClick={() => pickAccount(a.id, a.type)}
                         >
                             {a.name}
                         </button>
                     ))}
                 </div>
             </div>
+
+            {form.direction === 'transfer' && (
+                <div className="mf-section">
+                    <p className="mf-label">振替先</p>
+                    <div className="mf-acc-row">
+                        {accounts
+                            .filter((a) => a.id !== form.accountId)
+                            .map((a) => (
+                                <button
+                                    key={a.id}
+                                    type="button"
+                                    className={`mf-acc-pill ${form.counterAccountId === a.id ? 'active' : ''}`}
+                                    onClick={() => pickCounterAccount(a.id)}
+                                >
+                                    {a.name}
+                                </button>
+                            ))}
+                    </div>
+                </div>
+            )}
 
             {/* ── Memo toggle ── */}
             {!showDetail ? (

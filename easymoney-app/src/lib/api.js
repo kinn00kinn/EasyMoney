@@ -45,6 +45,7 @@ export const api = {
 	listTransactions: ({ month }) =>
 		request(`/transactions${month ? `?month=${month}` : ''}`),
 	createTransaction: (payload) => request('/transactions', { method: 'POST', body: payload }),
+	bulkUpdateTransactions: (payload) => request('/transactions/bulk', { method: 'POST', body: payload }),
 	getTransaction: (id) => request(`/transactions/${id}`),
 	updateTransaction: (id, payload) => request(`/transactions/${id}`, { method: 'PATCH', body: payload }),
 	deleteTransaction: (id) => request(`/transactions/${id}`, { method: 'DELETE' }),

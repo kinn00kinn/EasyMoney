@@ -73,6 +73,24 @@ const ensureIsoDate = (value) => {
 	return date.toISOString().slice(0, 10);
 };
 
+const PAYPAY_HEADER_PATTERN = /(操作日|入出金日|取引日|日付)/;
+
+const decodePayPayCsvText = async (file) => {
+	const buffer = await file.arrayBuffer();
+	if (!buffer.byteLength) return '';
+	const utf8Decoder = new TextDecoder('utf-8', { fatal: false });
+	let text = utf8Decoder.decode(buffer);
+	if (text.includes('\uFFFD') || !PAYPAY_HEADER_PATTERN.test(text)) {
+		try {
+			const shiftJisDecoder = new TextDecoder('shift_jis');
+			text = shiftJisDecoder.decode(buffer);
+		} catch {
+			// Cloudflare 環境が shift_jis 非対応の場合は UTF-8 の結果を使う
+		}
+	}
+	return text;
+};
+
 const baseAccount = z.object({
 	name: z.string().min(1),
 	type: z.enum(['cash', 'bank', 'credit']),
@@ -118,6 +136,11 @@ const transactionUpdateInput = transactionInput
 	.refine((value) => Object.keys(value).length > 0, {
 		message: 'At least one field is required',
 	});
+
+const bulkTransactionUpdateInput = z.object({
+	ids: z.array(z.string().min(1)).min(1),
+	patch: transactionUpdateInput,
+});
 
 const confirmImportSchema = z.object({
 	rows: z
@@ -452,113 +475,26 @@ router.get('/transactions/:id', async (request, env) => {
 
 router.patch('/transactions/:id', async (request, env) => {
 	const { id } = request.params;
-	const existing = await env.DB.prepare(`SELECT * FROM transactions WHERE id = ?`).bind(id).first();
-	if (!existing) {
-		throw createHttpError(404, 'Transaction not found');
-	}
-
 	const payload = transactionUpdateInput.parse(await parseJsonBody(request));
-	const normalizedDate = payload.date ? ensureIsoDate(payload.date) : existing.occurred_on;
-	const amountCents = payload.amount != null ? amountToCents(payload.amount) : existing.amount;
-	const description = payload.description ?? existing.description;
-	const memo = payload.memo ?? existing.memo;
-	const paymentMethod = payload.paymentMethod ?? existing.payment_method;
-	const accountId = payload.accountId ?? existing.account_id;
-	const hasCounterAccountUpdate = Object.prototype.hasOwnProperty.call(payload, 'counterAccountId');
-	const counterAccountId = hasCounterAccountUpdate ? payload.counterAccountId ?? null : existing.counter_account_id ?? null;
-	const account = await getAccount(env, accountId);
-	if (!account) {
-		throw createHttpError(404, 'Account not found');
-	}
-
-	let category = null;
-	const hasCategoryUpdate = Object.prototype.hasOwnProperty.call(payload, 'categoryId');
-	const requestedCategoryId = hasCategoryUpdate ? payload.categoryId ?? null : existing.category_id ?? null;
-	if (requestedCategoryId) {
-		category = await getCategory(env, requestedCategoryId);
-	}
-	let counterAccount = null;
-	if (counterAccountId) {
-		counterAccount = await getAccount(env, counterAccountId);
-		if (!counterAccount) {
-			throw createHttpError(404, 'Counter account not found');
-		}
-		if (counterAccount.id === account.id) {
-			throw createHttpError(400, 'Counter account must be different from account');
-		}
-	}
-
-	let direction = payload.direction ?? null;
-	if (!direction) {
-		if (category) {
-			direction = category.kind === 'income' ? 'income' : category.kind === 'expense' ? 'expense' : 'transfer';
-		} else if (counterAccount) {
-			direction = 'transfer';
-		} else {
-			direction = existing.direction;
-		}
-	}
-
-	if (direction === 'transfer') {
-		if (!counterAccount) {
-			throw createHttpError(400, 'Transfer requires counter account');
-		}
-		category = null;
-	} else {
-		if (!category) {
-			throw createHttpError(400, 'Category is required for this transaction');
-		}
-		if (counterAccount) {
-			throw createHttpError(400, 'Counter account is only allowed for transfer transactions');
-		}
-	}
-
-	const now = new Date().toISOString();
-	const statements = [
-		env.DB.prepare(
-			`UPDATE transactions
-       SET occurred_on = ?, direction = ?, description = ?, memo = ?, amount = ?, account_id = ?,
-           category_id = ?, payment_method = ?, counter_account_id = ?, updated_at = ?
-       WHERE id = ?`,
-		).bind(
-			normalizedDate,
-			direction,
-			description,
-			memo ?? null,
-			amountCents,
-			account.id,
-			category?.id ?? null,
-			paymentMethod,
-			counterAccount?.id ?? null,
-			now,
-			id,
-		),
-		env.DB.prepare(`DELETE FROM entries WHERE transaction_id = ?`).bind(id),
-		...buildEntries({
-			transactionId: id,
-			direction,
-			amountCents,
-			accountId: account.id,
-			categoryId: category?.id ?? null,
-			counterAccountId: counterAccount?.id ?? null,
-		}).map((entry) =>
-			env.DB.prepare(
-				`INSERT INTO entries (id, transaction_id, ledger_type, ledger_id, side, amount)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-			).bind(entry.id, entry.transactionId, entry.ledgerType, entry.ledgerId, entry.side, entry.amount),
-		),
-	];
-
-	await env.DB.batch(statements);
-	const updatedRow = await fetchTransactionRow(env, id);
+	const updatedRow = await updateTransactionRecord(env, id, payload);
 	const entries = await fetchTransactionEntries(env, id);
 
 	return json({
 		data: {
-			...mapTransactionRow(updatedRow),
+			...updatedRow,
 			entries,
 		},
 	});
+});
+
+router.post('/transactions/bulk', async (request, env) => {
+	const payload = bulkTransactionUpdateInput.parse(await parseJsonBody(request));
+	const updatedRows = [];
+	for (const id of payload.ids) {
+		const row = await updateTransactionRecord(env, id, payload.patch);
+		updatedRows.push(row);
+	}
+	return json({ data: updatedRows });
 });
 
 router.delete('/transactions/:id', async (request, env) => {
@@ -818,7 +754,7 @@ router.post('/imports/paypay', async (request, env) => {
 		throw createHttpError(404, 'Account not found');
 	}
 
-	const csvText = await file.text();
+	const csvText = await decodePayPayCsvText(file);
 	const parsed = Papa.parse(csvText, {
 		header: true,
 		skipEmptyLines: true,
@@ -1330,15 +1266,148 @@ const buildEntries = ({ transactionId, direction, amountCents, accountId, catego
 	];
 };
 
+const updateTransactionRecord = async (env, id, payload) => {
+	const existing = await env.DB.prepare(`SELECT * FROM transactions WHERE id = ?`).bind(id).first();
+	if (!existing) {
+		throw createHttpError(404, 'Transaction not found');
+	}
+	const normalizedDate = payload.date ? ensureIsoDate(payload.date) : existing.occurred_on;
+	const amountCents = payload.amount != null ? amountToCents(payload.amount) : existing.amount;
+	const description = payload.description ?? existing.description;
+	const memo = payload.memo ?? existing.memo;
+	const paymentMethod = payload.paymentMethod ?? existing.payment_method;
+	const accountId = payload.accountId ?? existing.account_id;
+	const hasCounterAccountUpdate = Object.prototype.hasOwnProperty.call(payload, 'counterAccountId');
+	const counterAccountId = hasCounterAccountUpdate ? payload.counterAccountId ?? null : existing.counter_account_id ?? null;
+	const account = await getAccount(env, accountId);
+	if (!account) {
+		throw createHttpError(404, 'Account not found');
+	}
+
+	let category = null;
+	const hasCategoryUpdate = Object.prototype.hasOwnProperty.call(payload, 'categoryId');
+	const requestedCategoryId = hasCategoryUpdate ? payload.categoryId ?? null : existing.category_id ?? null;
+	if (requestedCategoryId) {
+		category = await getCategory(env, requestedCategoryId);
+	}
+	let counterAccount = null;
+	if (counterAccountId) {
+		counterAccount = await getAccount(env, counterAccountId);
+		if (!counterAccount) {
+			throw createHttpError(404, 'Counter account not found');
+		}
+		if (counterAccount.id === account.id) {
+			throw createHttpError(400, 'Counter account must be different from account');
+		}
+	}
+
+	let direction = payload.direction ?? null;
+	if (!direction) {
+		if (category) {
+			direction = category.kind === 'income' ? 'income' : category.kind === 'expense' ? 'expense' : 'transfer';
+		} else if (counterAccount) {
+			direction = 'transfer';
+		} else {
+			direction = existing.direction;
+		}
+	}
+
+	if (direction === 'transfer') {
+		if (!counterAccount) {
+			throw createHttpError(400, 'Transfer requires counter account');
+		}
+		category = null;
+	} else {
+		if (!category) {
+			throw createHttpError(400, 'Category is required for this transaction');
+		}
+		if (counterAccount) {
+			throw createHttpError(400, 'Counter account is only allowed for transfer transactions');
+		}
+	}
+
+	const now = new Date().toISOString();
+	const statements = [
+		env.DB.prepare(
+			`UPDATE transactions
+       SET occurred_on = ?, direction = ?, description = ?, memo = ?, amount = ?, account_id = ?,
+           category_id = ?, payment_method = ?, counter_account_id = ?, updated_at = ?
+       WHERE id = ?`,
+		).bind(
+			normalizedDate,
+			direction,
+			description,
+			memo ?? null,
+			amountCents,
+			account.id,
+			category?.id ?? null,
+			paymentMethod,
+			counterAccount?.id ?? null,
+			now,
+			id,
+		),
+		env.DB.prepare(`DELETE FROM entries WHERE transaction_id = ?`).bind(id),
+		...buildEntries({
+			transactionId: id,
+			direction,
+			amountCents,
+			accountId: account.id,
+			categoryId: category?.id ?? null,
+			counterAccountId: counterAccount?.id ?? null,
+		}).map((entry) =>
+			env.DB.prepare(
+				`INSERT INTO entries (id, transaction_id, ledger_type, ledger_id, side, amount)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+			).bind(entry.id, entry.transactionId, entry.ledgerType, entry.ledgerId, entry.side, entry.amount),
+		),
+	];
+
+	await env.DB.batch(statements);
+	const updatedRow = await fetchTransactionRow(env, id);
+	return mapTransactionRow(updatedRow);
+};
+
+const normalizeDigits = (value) =>
+	String(value ?? '')
+		.replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+		.trim();
+
+const parseIntegerField = (value) => {
+	const normalized = normalizeDigits(value);
+	if (!normalized) return null;
+	const parsed = Number(normalized);
+	return Number.isFinite(parsed) ? parsed : null;
+};
+
+const resolvePayPayDate = (raw) => {
+	const directField = raw['入出金日'] || raw['取引日'] || raw['日付'];
+	if (directField) {
+		try {
+			return ensureIsoDate(directField);
+		} catch {
+			// Invalid format, fall through to composed fields
+		}
+	}
+	const year = parseIntegerField(raw['操作日(年)']);
+	const month = parseIntegerField(raw['操作日(月)']);
+	const day = parseIntegerField(raw['操作日(日)']);
+	if (!year || !month || !day) return null;
+	const candidate = `${year.toString().padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+	try {
+		return ensureIsoDate(candidate);
+	} catch {
+		return null;
+	}
+};
+
 const normalizePayPayRow = (raw) => {
-	const dateField = raw['入出金日'] || raw['取引日'] || raw['日付'];
-	const outgoingRaw = raw['出金額'] ?? raw['出金'] ?? raw['出金金額'];
-	const incomingRaw = raw['入金額'] ?? raw['入金'] ?? raw['入金金額'];
+	const date = resolvePayPayDate(raw);
+	const outgoingRaw = raw['出金額'] ?? raw['出金'] ?? raw['出金金額'] ?? raw['お支払金額'];
+	const incomingRaw = raw['入金額'] ?? raw['入金'] ?? raw['入金金額'] ?? raw['お預り金額'];
 	const description = raw['摘要'] || raw['内容'] || raw['備考'] || raw['メモ'];
 
-	if (!dateField || !(incomingRaw || outgoingRaw)) return null;
+	if (!date || !(incomingRaw || outgoingRaw)) return null;
 
-	const date = ensureIsoDate(dateField);
 	const incoming = amountFromCsv(incomingRaw);
 	const outgoing = amountFromCsv(outgoingRaw);
 	let flow = 'outflow';
@@ -1348,11 +1417,13 @@ const normalizePayPayRow = (raw) => {
 		amount = incoming;
 	}
 	if (!amount) return null;
+	const memoValue = typeof raw['メモ'] === 'string' ? raw['メモ'].trim() : '';
+	const memo = memoValue.length ? memoValue : null;
 	return {
 		id: crypto.randomUUID(),
 		date,
 		description: description?.trim() || 'PayPay取引',
-		memo: raw['メモ'] ?? null,
+		memo,
 		amountCents: amount,
 		flow,
 		raw,

@@ -7,6 +7,7 @@ import {
 import { TransactionForm } from './components/TransactionForm.jsx';
 import { MobileTransactionForm } from './components/MobileTransactionForm.jsx';
 import { TransactionsTable } from './components/TransactionsTable.jsx';
+import { TransactionsBulkEditor } from './components/TransactionsBulkEditor.jsx';
 import { TransactionDetail } from './components/TransactionDetail.jsx';
 import { AccountsPanel } from './components/AccountsPanel.jsx';
 import { AnalyticsPanel } from './components/AnalyticsPanel.jsx';
@@ -51,6 +52,10 @@ function App() {
 	const [editingCategoryId, setEditingCategoryId] = useState(null);
 	const [selectedTransactionId, setSelectedTransactionId] = useState(null);
 	const [monthFilter, setMonthFilter] = useState(dayjs().format('YYYY-MM'));
+	const [listEditMode, setListEditMode] = useState(false);
+	const [bulkSelection, setBulkSelection] = useState([]);
+	const [bulkError, setBulkError] = useState('');
+	const [bulkApplying, setBulkApplying] = useState(false);
 	const queryClient = useQueryClient();
 
 	const { data: accountsResponse } = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
@@ -77,6 +82,18 @@ function App() {
 	const sankey = sankeyResponse?.data ?? [];
 	const transactionSuggestions = suggestionResponse?.data ?? {};
 	const activeTabMeta = tabs.find((t) => t.id === activeTab) ?? tabs[0];
+
+	useEffect(() => {
+		setBulkSelection((prev) => prev.filter((id) => transactions.some((tx) => tx.id === id)));
+	}, [transactions]);
+
+	useEffect(() => {
+		if (activeTab !== 'transactions' && listEditMode) {
+			setListEditMode(false);
+			setBulkSelection([]);
+			setBulkError('');
+		}
+	}, [activeTab, listEditMode]);
 
 	const headerMetrics = [
 		{ label: '収入', value: summary?.month?.income ?? 0, tone: 'positive' },
@@ -171,8 +188,72 @@ function App() {
 	};
 	const handleCategoryCancel = () => { setEditingCategoryId(null); resetCategoryForm(); };
 
+	const enterListEditMode = () => {
+		setListEditMode(true);
+		setSelectedTransactionId(null);
+		setBulkSelection([]);
+		setBulkError('');
+	};
+	const exitListEditMode = () => {
+		setListEditMode(false);
+		setBulkSelection([]);
+		setBulkError('');
+	};
+	const handleListEditToggle = () => {
+		if (listEditMode) {
+			exitListEditMode();
+		} else {
+			enterListEditMode();
+		}
+	};
+	const handleToggleTransactionSelection = (id) => {
+		setBulkSelection((prev) => (prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]));
+	};
+	const handleToggleSelectAll = (checked) => {
+		if (!checked) {
+			setBulkSelection([]);
+			return;
+		}
+		setBulkSelection(transactions.map((transaction) => transaction.id));
+	};
+	const handleBulkApply = async (patch) => {
+		if (!bulkSelection.length) {
+			setBulkError('取引を選択してください');
+			return;
+		}
+		if (patch.direction === 'transfer') {
+			const conflict = transactions.find(
+				(transaction) => bulkSelection.includes(transaction.id) && transaction.accountId === patch.counterAccountId,
+			);
+			if (conflict) {
+				setBulkError('振替元と振替先が同じ取引が含まれています');
+				return;
+			}
+		}
+		setBulkApplying(true);
+		setBulkError('');
+		const payload = {
+			direction: patch.direction,
+			categoryId: patch.direction === 'transfer' ? null : patch.categoryId,
+			counterAccountId: patch.direction === 'transfer' ? patch.counterAccountId : null,
+		};
+		try {
+			await api.bulkUpdateTransactions({ ids: bulkSelection, patch: payload });
+			refreshBookkeeping();
+			setBulkSelection([]);
+		} catch (error) {
+			setBulkError(error.message);
+		} finally {
+			setBulkApplying(false);
+		}
+	};
+
 	const categoryCounts = useMemo(() => categories.map((c) => ({ ...c, total: c.total ?? 0 })), [categories]);
-	const handleMonthFilterChange = (v) => { setMonthFilter(v); setSelectedTransactionId(null); };
+	const handleMonthFilterChange = (v) => {
+		setMonthFilter(v);
+		setSelectedTransactionId(null);
+		setBulkSelection([]);
+	};
 
 	const isMobile = useIsMobile();
 
@@ -192,10 +273,38 @@ function App() {
 				<TransactionForm accounts={accounts} categories={categories} onSubmit={handleTransactionSubmit} isSubmitting={transactionMutation.isPending} suggestions={transactionSuggestions} />
 			)}
 			<MonthFilterControls value={monthFilter} onChange={handleMonthFilterChange} />
+			<div className="transactions-toolbar">
+				<div className="toolbar-meta">
+					<span className="toolbar-chip">{listEditMode ? 'リスト編集モード' : '閲覧モード'}</span>
+					{listEditMode && <span className="toolbar-count">{bulkSelection.length}件選択中</span>}
+				</div>
+				<button className="btn secondary" type="button" onClick={handleListEditToggle}>
+					{listEditMode ? '編集を終了' : 'リスト編集'}
+				</button>
+			</div>
+			{listEditMode && (
+				<TransactionsBulkEditor
+					count={bulkSelection.length}
+					accounts={accounts}
+					categories={categories}
+					onApply={handleBulkApply}
+					onCancel={exitListEditMode}
+					isApplying={bulkApplying}
+					errorMessage={bulkError}
+				/>
+			)}
 			{loadingTransactions ? <p className="status">読み込み中…</p> : (
 				<div className="transactions-layout">
-					<TransactionsTable transactions={transactions} selectedId={selectedTransactionId} onSelect={setSelectedTransactionId} />
-					{selectedTransactionId && (
+					<TransactionsTable
+						transactions={transactions}
+						selectedId={listEditMode ? null : selectedTransactionId}
+						onSelect={listEditMode ? undefined : setSelectedTransactionId}
+						editMode={listEditMode}
+						selection={bulkSelection}
+						onToggleSelection={handleToggleTransactionSelection}
+						onToggleSelectAll={handleToggleSelectAll}
+					/>
+					{!listEditMode && selectedTransactionId && (
 						<>
 							{isMobile && <div className="detail-overlay" onClick={() => setSelectedTransactionId(null)} />}
 							<TransactionDetail

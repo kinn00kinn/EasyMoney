@@ -1,9 +1,36 @@
+import { useEffect, useRef } from 'react';
 import { formatCurrency, formatDate } from '../lib/format.js';
 
-export function TransactionsTable({ transactions = [], selectedId, onSelect }) {
+export function TransactionsTable({
+	transactions = [],
+	selectedId,
+	onSelect,
+	editMode = false,
+	selection = [],
+	onToggleSelection,
+	onToggleSelectAll,
+}) {
 	const handleSelect = (id) => {
 		if (!onSelect) return;
 		onSelect(id === selectedId ? null : id);
+	};
+	const selectionSet = new Set(selection);
+	const allSelected = editMode && transactions.length > 0 && selection.length === transactions.length;
+	const indeterminate = editMode && selection.length > 0 && selection.length < transactions.length;
+	const headerCheckboxRef = useRef(null);
+
+	useEffect(() => {
+		if (headerCheckboxRef.current) {
+			headerCheckboxRef.current.indeterminate = indeterminate;
+		}
+	}, [indeterminate]);
+
+	const handleRowAction = (id) => {
+		if (editMode) {
+			onToggleSelection?.(id);
+		} else {
+			handleSelect(id);
+		}
 	};
 
 	return (
@@ -18,6 +45,16 @@ export function TransactionsTable({ transactions = [], selectedId, onSelect }) {
 				<table>
 					<thead>
 						<tr>
+							{editMode && (
+								<th className="checkbox-cell">
+									<input
+										type="checkbox"
+										ref={headerCheckboxRef}
+										checked={allSelected}
+										onChange={(event) => onToggleSelectAll?.(event.target.checked)}
+									/>
+								</th>
+							)}
 							<th>日付</th>
 							<th>内容</th>
 							<th>カテゴリ</th>
@@ -27,7 +64,25 @@ export function TransactionsTable({ transactions = [], selectedId, onSelect }) {
 					</thead>
 					<tbody>
 						{transactions.map((tx) => (
-							<tr key={tx.id} onClick={() => handleSelect(tx.id)} className="table-row" data-selected={tx.id === selectedId}>
+							<tr
+								key={tx.id}
+								onClick={() => handleRowAction(tx.id)}
+								className="table-row"
+								data-selected={tx.id === selectedId}
+								data-edit-mode={editMode}
+							>
+								{editMode && (
+									<td className="checkbox-cell">
+										<input
+											type="checkbox"
+											checked={selectionSet.has(tx.id)}
+											onChange={(event) => {
+												event.stopPropagation();
+												onToggleSelection?.(tx.id);
+											}}
+										/>
+									</td>
+								)}
 								<td>{formatDate(tx.date)}</td>
 								<td>
 									<div className="table-primary">{tx.description}</div>
@@ -39,7 +94,7 @@ export function TransactionsTable({ transactions = [], selectedId, onSelect }) {
 							</tr>
 						))}
 						{!transactions.length && (
-							<tr><td colSpan={5} className="empty">まだ取引がありません</td></tr>
+							<tr><td colSpan={editMode ? 6 : 5} className="empty">まだ取引がありません</td></tr>
 						)}
 					</tbody>
 				</table>
@@ -53,9 +108,21 @@ export function TransactionsTable({ transactions = [], selectedId, onSelect }) {
 							<div
 								key={tx.id}
 								className="mobile-tx-item"
-								onClick={() => handleSelect(tx.id)}
+								onClick={() => handleRowAction(tx.id)}
 								data-selected={tx.id === selectedId}
+								data-edit-mode={editMode}
 							>
+								{editMode && (
+									<input
+										type="checkbox"
+										className="mobile-tx-checkbox"
+										checked={selectionSet.has(tx.id)}
+										onChange={(event) => {
+											event.stopPropagation();
+											onToggleSelection?.(tx.id);
+										}}
+									/>
+								)}
 								<div className="mobile-tx-left">
 									<div className="mobile-tx-desc">{tx.description}</div>
 									<div className="mobile-tx-meta">

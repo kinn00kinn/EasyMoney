@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { today } from '../lib/format.js';
 
 const createInitialState = () => ({
@@ -9,6 +9,8 @@ const createInitialState = () => ({
 	accountId: '',
 	categoryId: '',
 	paymentMethod: 'cash',
+	direction: 'expense',
+	counterAccountId: '',
 });
 
 export function TransactionForm({ accounts = [], categories = [], onSubmit, isSubmitting, suggestions = {} }) {
@@ -16,40 +18,104 @@ export function TransactionForm({ accounts = [], categories = [], onSubmit, isSu
 	const merchantSuggestions = suggestions.merchants ?? [];
 	const categorySuggestions = suggestions.categories ?? [];
 	const accountSuggestions = suggestions.accounts ?? [];
+	const categoryMap = useMemo(() => new Map(categories.map((category) => [category.id, category.kind])), [categories]);
+	const filteredCategories = useMemo(() => {
+		if (form.direction === 'transfer') return [];
+		const targetKind = form.direction === 'income' ? 'income' : 'expense';
+		return categories.filter((category) => category.kind === targetKind);
+	}, [categories, form.direction]);
+
+	const resetForm = () => setForm(createInitialState());
 
 	const handleChange = (event) => {
 		const { name, value } = event.target;
-		setForm((prev) => ({ ...prev, [name]: value }));
-		if (name === 'accountId') {
-			const account = accounts.find((accountItem) => accountItem.id === value);
-			if (account) {
-				setForm((prev) => ({ ...prev, paymentMethod: account.type }));
+		setForm((prev) => {
+			if (name === 'counterAccountId' && value === prev.accountId) {
+				return prev;
 			}
-		}
+			let next = { ...prev, [name]: value };
+			if (name === 'accountId') {
+				const account = accounts.find((accountItem) => accountItem.id === value);
+				next.paymentMethod = account?.type ?? prev.paymentMethod;
+				if (prev.counterAccountId === value) {
+					next.counterAccountId = '';
+				}
+			}
+			return next;
+		});
+	};
+
+	const handleDirectionChange = (direction) => {
+		setForm((prev) => {
+			if (direction === 'transfer') {
+				return { ...prev, direction, categoryId: '', counterAccountId: '' };
+			}
+			const targetKind = direction === 'income' ? 'income' : 'expense';
+			const defaultCategoryId = categories.find((category) => category.kind === targetKind)?.id ?? '';
+			return {
+				...prev,
+				direction,
+				categoryId: defaultCategoryId,
+				counterAccountId: '',
+			};
+		});
 	};
 
 	const handleSubmit = (event) => {
 		event.preventDefault();
-		if (!form.accountId || !form.categoryId || !form.amount) return;
-		onSubmit(form, () => setForm(createInitialState()));
+		if (!form.accountId || !form.amount || !form.description) return;
+		if (form.direction === 'transfer') {
+			if (!form.counterAccountId) return;
+		} else if (!form.categoryId) {
+			return;
+		}
+		const payload = {
+			...form,
+			categoryId: form.direction === 'transfer' ? null : form.categoryId,
+			counterAccountId: form.direction === 'transfer' ? form.counterAccountId : null,
+		};
+		onSubmit(payload, resetForm);
 	};
 
 	const applyMerchant = (merchant) => {
-		setForm((prev) => ({
-			...prev,
-			description: merchant.description,
-			categoryId: merchant.categoryId ?? prev.categoryId,
-			accountId: merchant.accountId ?? prev.accountId,
-			paymentMethod: merchant.accountType ?? prev.paymentMethod,
-		}));
+		const categoryKind = merchant.categoryId ? categoryMap.get(merchant.categoryId) : null;
+		const inferredDirection =
+			categoryKind === 'income' ? 'income' : categoryKind === 'expense' ? 'expense' : form.direction;
+		setForm((prev) => {
+			const nextDirection = inferredDirection ?? prev.direction;
+			const isTransfer = nextDirection === 'transfer';
+			const directionKind = nextDirection === 'income' ? 'income' : 'expense';
+			const merchantCategoryValid =
+				!isTransfer && merchant.categoryId && categoryMap.get(merchant.categoryId) === directionKind;
+			const account = merchant.accountId ? accounts.find((accountItem) => accountItem.id === merchant.accountId) : null;
+			return {
+				...prev,
+				description: merchant.description,
+				direction: nextDirection,
+				categoryId: merchantCategoryValid ? merchant.categoryId : isTransfer ? '' : prev.categoryId,
+				counterAccountId: isTransfer ? '' : prev.counterAccountId,
+				accountId: merchant.accountId ?? prev.accountId,
+				paymentMethod: account?.type ?? merchant.accountType ?? prev.paymentMethod,
+			};
+		});
 	};
 
 	const applyCategory = (categoryId) => {
-		setForm((prev) => ({ ...prev, categoryId }));
+		const kind = categoryMap.get(categoryId);
+		setForm((prev) => ({
+			...prev,
+			direction: kind === 'income' ? 'income' : 'expense',
+			categoryId,
+		}));
 	};
 
 	const applyAccount = (accountId, accountType) => {
-		setForm((prev) => ({ ...prev, accountId, paymentMethod: accountType ?? prev.paymentMethod }));
+		setForm((prev) => ({
+			...prev,
+			accountId,
+			paymentMethod: accountType ?? prev.paymentMethod,
+			counterAccountId: prev.counterAccountId === accountId ? '' : prev.counterAccountId,
+		}));
 	};
 
 	return (
@@ -63,6 +129,21 @@ export function TransactionForm({ accounts = [], categories = [], onSubmit, isSu
 					<button type="submit" className="btn primary" disabled={isSubmitting}>
 						{isSubmitting ? '保存中…' : '保存'}
 					</button>
+				</div>
+			</div>
+			<div className="direction-toggle">
+				<span>区分</span>
+				<div className="segmented-control">
+					{['expense', 'income', 'transfer'].map((direction) => (
+						<button
+							type="button"
+							key={direction}
+							className={form.direction === direction ? 'active' : ''}
+							onClick={() => handleDirectionChange(direction)}
+						>
+							{direction === 'expense' ? '支出' : direction === 'income' ? '収入' : '振替'}
+						</button>
+					))}
 				</div>
 			</div>
 			<div className="form-grid">
@@ -101,17 +182,33 @@ export function TransactionForm({ accounts = [], categories = [], onSubmit, isSu
 						))}
 					</select>
 				</label>
-				<label className="field">
-					<span>カテゴリ</span>
-					<select name="categoryId" value={form.categoryId} onChange={handleChange} required>
-						<option value="">選択してください</option>
-						{categories.map((category) => (
-							<option key={category.id} value={category.id}>
-								{category.name}
-							</option>
-						))}
-					</select>
-				</label>
+				{form.direction === 'transfer' ? (
+					<label className="field">
+						<span>振替先口座</span>
+						<select name="counterAccountId" value={form.counterAccountId} onChange={handleChange} required>
+							<option value="">選択してください</option>
+							{accounts
+								.filter((account) => account.id !== form.accountId)
+								.map((account) => (
+									<option key={account.id} value={account.id}>
+										{account.name}
+									</option>
+								))}
+						</select>
+					</label>
+				) : (
+					<label className="field">
+						<span>カテゴリ</span>
+						<select name="categoryId" value={form.categoryId} onChange={handleChange} required>
+							<option value="">選択してください</option>
+							{filteredCategories.map((category) => (
+								<option key={category.id} value={category.id}>
+									{category.name}
+								</option>
+							))}
+						</select>
+					</label>
+				)}
 			</div>
 			{merchantSuggestions.length ? (
 				<SuggestionGroup title="よく使うお店">

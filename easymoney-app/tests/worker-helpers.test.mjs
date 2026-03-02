@@ -65,6 +65,30 @@ describe('worker helper functions', () => {
 		expect(row.description).toBe('スーパー');
 	});
 
+	it('handles split operation date columns and お支払/お預り金額', () => {
+		const outflow = normalizePayPayRow({
+			'操作日(年)': '2026',
+			'操作日(月)': '2',
+			'操作日(日)': '27',
+			お支払金額: '7,644',
+			摘要: 'ＰＡＹＰＡＹカ－ド',
+		});
+		expect(outflow).not.toBeNull();
+		expect(outflow.date).toBe('2026-02-27');
+		expect(outflow.flow).toBe('outflow');
+		expect(outflow.amountCents).toBe(764400);
+
+		const inflow = normalizePayPayRow({
+			'操作日(年)': '2026',
+			'操作日(月)': '1',
+			'操作日(日)': '13',
+			お預り金額: '50,000',
+			摘要: 'ローソンATM入金',
+		});
+		expect(inflow.flow).toBe('inflow');
+		expect(inflow.amountCents).toBe(5000000);
+	});
+
 	it('parses amount strings consistently', () => {
 		expect(amountFromCsv('1,000')).toBe(100000);
 		expect(amountFromCsv('  250.5 ')).toBe(25050);
