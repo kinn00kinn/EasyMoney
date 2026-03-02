@@ -119,7 +119,7 @@ export function TransactionForm({ accounts = [], categories = [], onSubmit, isSu
 	};
 
 	return (
-		<form className="panel" onSubmit={handleSubmit}>
+		<form className="panel" data-transaction-form="desktop" onSubmit={handleSubmit}>
 			<div className="panel-header">
 				<div>
 					<p className="panel-title">取引入力</p>

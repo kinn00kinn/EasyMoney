@@ -150,7 +150,7 @@ export function MobileTransactionForm({ accounts = [], categories = [], onSubmit
     ];
 
     return (
-        <div className="mf">
+        <div className="mf" data-transaction-form="mobile">
             <div className="mf-mode-toggle">
                 {['expense', 'income', 'transfer'].map((mode) => (
                     <button

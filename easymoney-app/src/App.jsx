@@ -13,6 +13,8 @@ import { AccountsPanel } from './components/AccountsPanel.jsx';
 import { AnalyticsPanel } from './components/AnalyticsPanel.jsx';
 import { ImportPanel } from './components/ImportPanel.jsx';
 import { BackupPanel } from './components/BackupPanel.jsx';
+import { TransactionsFilters } from './components/TransactionsFilters.jsx';
+import { CommandPalette } from './components/CommandPalette.jsx';
 import { api } from './lib/api.js';
 import { formatCurrency } from './lib/format.js';
 import './App.css';
@@ -53,10 +55,12 @@ function App() {
 	const [selectedTransactionId, setSelectedTransactionId] = useState(null);
 	const [monthFilter, setMonthFilter] = useState(dayjs().format('YYYY-MM'));
 	const [analyticsMonth, setAnalyticsMonth] = useState(dayjs().format('YYYY-MM'));
+	const [transactionFilters, setTransactionFilters] = useState({ search: '', accountId: '', direction: 'all' });
 	const [listEditMode, setListEditMode] = useState(false);
 	const [bulkSelection, setBulkSelection] = useState([]);
 	const [bulkError, setBulkError] = useState('');
 	const [bulkApplying, setBulkApplying] = useState(false);
+	const [isCommandOpen, setCommandOpen] = useState(false);
 	const queryClient = useQueryClient();
 
 	const { data: accountsResponse } = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
@@ -90,10 +94,38 @@ function App() {
 	const flows = flowsResponse?.data ?? { flows: [], paymentMethods: [] };
 	const transactionSuggestions = suggestionResponse?.data ?? {};
 	const activeTabMeta = tabs.find((t) => t.id === activeTab) ?? tabs[0];
+	const filteredTransactions = useMemo(() => {
+		const search = transactionFilters.search.trim().toLowerCase();
+		return transactions.filter((tx) => {
+			if (transactionFilters.accountId && tx.accountId !== transactionFilters.accountId) return false;
+			if (transactionFilters.direction !== 'all' && tx.direction !== transactionFilters.direction) return false;
+			if (!search) return true;
+			const haystack = [
+				tx.description ?? '',
+				tx.memo ?? '',
+				tx.categoryName ?? '',
+				tx.accountName ?? '',
+			]
+				.join(' ')
+				.toLowerCase();
+			return haystack.includes(search);
+		});
+	}, [transactions, transactionFilters]);
 
 	useEffect(() => {
 		setBulkSelection((prev) => prev.filter((id) => transactions.some((tx) => tx.id === id)));
 	}, [transactions]);
+
+	useEffect(() => {
+		const handler = (event) => {
+			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+				event.preventDefault();
+				setCommandOpen(true);
+			}
+		};
+		window.addEventListener('keydown', handler);
+		return () => window.removeEventListener('keydown', handler);
+	}, []);
 
 	useEffect(() => {
 		if (activeTab !== 'transactions' && listEditMode) {
@@ -104,9 +136,83 @@ function App() {
 	}, [activeTab, listEditMode]);
 
 	const headerMetrics = [
-		{ label: '収入', value: summary?.month?.income ?? 0, tone: 'positive' },
-		{ label: '支出', value: summary?.month?.expense ?? 0, tone: 'negative' },
-		{ label: '収支', value: summary?.month?.net ?? 0, tone: (summary?.month?.net ?? 0) >= 0 ? 'positive' : 'negative' },
+		{ label: '収入', value: summary?.month?.income ?? 0, tone: 'positive', filter: 'income' },
+		{ label: '支出', value: summary?.month?.expense ?? 0, tone: 'negative', filter: 'expense' },
+		{ label: '収支', value: summary?.month?.net ?? 0, tone: (summary?.month?.net ?? 0) >= 0 ? 'positive' : 'negative', filter: 'all' },
+	];
+	const commandActions = [
+		{
+			id: 'focus-entry',
+			label: '取引入力フォームにフォーカス',
+			description: 'すぐに記録を始める',
+			run: () => {
+				setActiveTab('transactions');
+				focusTransactionForm();
+			},
+		},
+		{
+			id: 'open-transactions',
+			label: '取引タブに移動',
+			description: '一覧と入力',
+			run: () => setActiveTab('transactions'),
+		},
+		{
+			id: 'toggle-list-edit',
+			label: 'リスト編集モードを切り替え',
+			description: '複数取引を一括編集',
+			run: () => handleListEditToggle(),
+		},
+		{
+			id: 'goto-accounts',
+			label: '口座タブに移動',
+			run: () => setActiveTab('accounts'),
+		},
+		{
+			id: 'goto-categories',
+			label: 'カテゴリタブに移動',
+			run: () => setActiveTab('categories'),
+		},
+		{
+			id: 'goto-import',
+			label: 'CSV 取込を開く',
+			run: () => setActiveTab('import'),
+		},
+		{
+			id: 'goto-backup',
+			label: 'バックアップを開く',
+			run: () => setActiveTab('backup'),
+		},
+		{
+			id: 'goto-analytics',
+			label: '分析タブを開く',
+			run: () => setActiveTab('analytics'),
+		},
+		{
+			id: 'filter-income',
+			label: '収入のみ表示',
+			run: () => {
+				setActiveTab('transactions');
+				handleTransactionFiltersChange({ direction: 'income' });
+			},
+		},
+		{
+			id: 'filter-expense',
+			label: '支出のみ表示',
+			run: () => {
+				setActiveTab('transactions');
+				handleTransactionFiltersChange({ direction: 'expense' });
+			},
+		},
+		{
+			id: 'clear-filters',
+			label: '取引フィルタをリセット',
+			run: () => resetTransactionFilters(),
+		},
+		{
+			id: 'filter-current-month',
+			label: '対象月を今月に戻す',
+			run: () => handleMonthFilterChange(dayjs().format('YYYY-MM')),
+		},
 	];
 
 	const invalidate = (keys) => {
@@ -196,6 +302,17 @@ function App() {
 	};
 	const handleCategoryCancel = () => { setEditingCategoryId(null); resetCategoryForm(); };
 
+	const resetTransactionFilters = () => setTransactionFilters({ search: '', accountId: '', direction: 'all' });
+	const handleTransactionFiltersChange = (next) => {
+		setTransactionFilters((prev) => ({ ...prev, ...next }));
+	};
+	const handleMetricShortcut = (direction) => {
+		if (activeTab !== 'transactions') {
+			setActiveTab('transactions');
+		}
+		handleTransactionFiltersChange({ direction });
+	};
+
 	const enterListEditMode = () => {
 		setListEditMode(true);
 		setSelectedTransactionId(null);
@@ -261,10 +378,19 @@ function App() {
 		setMonthFilter(v);
 		setSelectedTransactionId(null);
 		setBulkSelection([]);
+		resetTransactionFilters();
 	};
 	const handleAnalyticsMonthChange = (value) => {
 		setAnalyticsMonth(value);
 	};
+	const focusTransactionForm = () => {
+		requestAnimationFrame(() => {
+			const amountInput = document.querySelector('[data-transaction-form] input[name="amount"]');
+			amountInput?.focus();
+		});
+	};
+	const openCommandPalette = () => setCommandOpen(true);
+	const closeCommandPalette = () => setCommandOpen(false);
 
 	const isMobile = useIsMobile();
 
@@ -284,6 +410,12 @@ function App() {
 				<TransactionForm accounts={accounts} categories={categories} onSubmit={handleTransactionSubmit} isSubmitting={transactionMutation.isPending} suggestions={transactionSuggestions} />
 			)}
 			<MonthFilterControls value={monthFilter} onChange={handleMonthFilterChange} />
+			<TransactionsFilters
+				accounts={accounts}
+				filters={transactionFilters}
+				onChange={handleTransactionFiltersChange}
+				onReset={resetTransactionFilters}
+			/>
 			<div className="transactions-toolbar">
 				<div className="toolbar-meta">
 					<span className="toolbar-chip">{listEditMode ? 'リスト編集モード' : '閲覧モード'}</span>
@@ -307,7 +439,7 @@ function App() {
 			{loadingTransactions ? <p className="status">読み込み中…</p> : (
 				<div className="transactions-layout">
 					<TransactionsTable
-						transactions={transactions}
+						transactions={filteredTransactions}
 						selectedId={listEditMode ? null : selectedTransactionId}
 						onSelect={listEditMode ? undefined : setSelectedTransactionId}
 						editMode={listEditMode}
@@ -464,13 +596,24 @@ function App() {
 					<div>
 						<h1>{activeTabMeta.label}</h1>
 					</div>
-					<div className="header-metrics">
-						{headerMetrics.map((m) => (
-							<div key={m.label} className={`metric-card ${m.tone}`}>
-								<p className="metric-label">{m.label}</p>
-								<p className="metric-value">{formatCurrency(m.value)}</p>
-							</div>
-						))}
+					<div className="header-actions">
+						<div className="header-metrics">
+							{headerMetrics.map((m) => (
+								<button
+									type="button"
+									key={m.label}
+									className={`metric-card ${m.tone}`}
+									onClick={() => handleMetricShortcut(m.filter)}
+								>
+									<p className="metric-label">{m.label}</p>
+									<p className="metric-value">{formatCurrency(m.value)}</p>
+								</button>
+							))}
+						</div>
+						<button className="btn ghost command-btn" type="button" onClick={openCommandPalette}>
+							<span>コマンド</span>
+							<kbd>⌘K</kbd>
+						</button>
 					</div>
 				</header>
 				<main className="content">{renderContent()}</main>
@@ -493,6 +636,20 @@ function App() {
 					})}
 				</div>
 			</nav>
+			{isMobile && activeTab !== 'transactions' && (
+				<button
+					className="fab"
+					type="button"
+					onClick={() => {
+						setActiveTab('transactions');
+						focusTransactionForm();
+					}}
+					aria-label="取引を追加"
+				>
+					+
+				</button>
+			)}
+			<CommandPalette open={isCommandOpen} onClose={closeCommandPalette} actions={commandActions} />
 		</div>
 	);
 }
