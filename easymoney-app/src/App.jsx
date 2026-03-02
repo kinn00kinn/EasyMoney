@@ -62,28 +62,53 @@ function App() {
 	const [bulkApplying, setBulkApplying] = useState(false);
 	const [isCommandOpen, setCommandOpen] = useState(false);
 	const queryClient = useQueryClient();
+	const authQuery = useQuery({
+		queryKey: ['auth-me'],
+		queryFn: async () => {
+			try {
+				return await api.getCurrentUser();
+			} catch (error) {
+				if (error.message?.toLowerCase().includes('unauthorized')) {
+					return null;
+				}
+				throw error;
+			}
+		},
+		retry: false,
+	});
+	const currentUser = authQuery.data?.data ?? null;
+	const isAuthenticated = Boolean(currentUser);
+	const authLoading = authQuery.isLoading || authQuery.isFetching;
 
-	const { data: accountsResponse } = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
-	const { data: categoriesResponse } = useQuery({ queryKey: ['categories'], queryFn: api.listCategories });
+	const { data: accountsResponse } = useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts, enabled: isAuthenticated });
+	const { data: categoriesResponse } = useQuery({ queryKey: ['categories'], queryFn: api.listCategories, enabled: isAuthenticated });
 	const { data: transactionsResponse, isLoading: loadingTransactions } = useQuery({
 		queryKey: ['transactions', monthFilter || 'all'],
 		queryFn: () => api.listTransactions({ month: monthFilter || undefined }),
+		enabled: isAuthenticated,
 	});
 	const analyticsSummaryKey = analyticsMonth ? ['analytics-summary', analyticsMonth] : ['analytics-summary', 'current'];
 	const { data: summaryResponse } = useQuery({
 		queryKey: analyticsSummaryKey,
 		queryFn: () => api.getAnalyticsSummary({ month: analyticsMonth === 'all' ? 'all' : analyticsMonth || undefined }),
+		enabled: isAuthenticated,
 	});
-	const { data: monthlyResponse } = useQuery({ queryKey: ['analytics-monthly'], queryFn: api.getAnalyticsMonthly });
+	const { data: monthlyResponse } = useQuery({ queryKey: ['analytics-monthly'], queryFn: api.getAnalyticsMonthly, enabled: isAuthenticated });
 	const { data: categoryAnalyticsResponse } = useQuery({
 		queryKey: ['analytics-categories', analyticsMonth || 'current'],
 		queryFn: () => api.getAnalyticsByCategory({ month: analyticsMonth === 'all' ? 'all' : analyticsMonth || undefined }),
+		enabled: isAuthenticated,
 	});
 	const { data: flowsResponse } = useQuery({
 		queryKey: ['analytics-flows', analyticsMonth || 'current'],
 		queryFn: () => api.getAnalyticsFlows({ month: analyticsMonth === 'all' ? 'all' : analyticsMonth || undefined }),
+		enabled: isAuthenticated,
 	});
-	const { data: suggestionResponse } = useQuery({ queryKey: ['transaction-suggestions'], queryFn: api.getTransactionSuggestions });
+	const { data: suggestionResponse } = useQuery({
+		queryKey: ['transaction-suggestions'],
+		queryFn: api.getTransactionSuggestions,
+		enabled: isAuthenticated,
+	});
 
 	const accounts = accountsResponse?.data ?? [];
 	const categories = categoriesResponse?.data ?? [];
@@ -117,6 +142,7 @@ function App() {
 	}, [transactions]);
 
 	useEffect(() => {
+		if (!isAuthenticated) return undefined;
 		const handler = (event) => {
 			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
 				event.preventDefault();
@@ -125,7 +151,7 @@ function App() {
 		};
 		window.addEventListener('keydown', handler);
 		return () => window.removeEventListener('keydown', handler);
-	}, []);
+	}, [isAuthenticated]);
 
 	useEffect(() => {
 		if (activeTab !== 'transactions' && listEditMode) {
@@ -135,6 +161,14 @@ function App() {
 		}
 	}, [activeTab, listEditMode]);
 
+	if (authLoading) {
+		return <FullScreenSpinner />;
+	}
+	if (!isAuthenticated) {
+		return <LoginView />;
+	}
+
+	const userInitial = (currentUser?.name?.[0] ?? currentUser?.email?.[0] ?? 'U').toUpperCase();
 	const headerMetrics = [
 		{ label: '収入', value: summary?.month?.income ?? 0, tone: 'positive', filter: 'income' },
 		{ label: '支出', value: summary?.month?.expense ?? 0, tone: 'negative', filter: 'expense' },
@@ -204,6 +238,11 @@ function App() {
 			},
 		},
 		{
+			id: 'logout',
+			label: 'ログアウト',
+			run: () => handleLogout(),
+		},
+		{
 			id: 'clear-filters',
 			label: '取引フィルタをリセット',
 			run: () => resetTransactionFilters(),
@@ -266,6 +305,13 @@ function App() {
 		onSuccess: (_data, deletedId) => {
 			invalidate([['categories'], ['analytics-categories']]);
 			setEditingCategoryId((c) => { if (c === deletedId) { resetCategoryForm(); return null; } return c; });
+		},
+	});
+	const logoutMutation = useMutation({
+		mutationFn: api.logout,
+		onSuccess: () => {
+			queryClient.removeQueries();
+			window.location.href = '/';
 		},
 	});
 
@@ -388,6 +434,11 @@ function App() {
 			const amountInput = document.querySelector('[data-transaction-form] input[name="amount"]');
 			amountInput?.focus();
 		});
+	};
+	const handleLogout = () => {
+		if (!logoutMutation.isPending) {
+			logoutMutation.mutate();
+		}
 	};
 	const openCommandPalette = () => setCommandOpen(true);
 	const closeCommandPalette = () => setCommandOpen(false);
@@ -614,6 +665,20 @@ function App() {
 							<span>コマンド</span>
 							<kbd>⌘K</kbd>
 						</button>
+						<div className="user-pill">
+							<div className="user-avatar">{userInitial}</div>
+							<div className="user-meta">
+								<p className="user-name">{currentUser?.name || currentUser?.email}</p>
+								<button
+									type="button"
+									className="link-button"
+									onClick={handleLogout}
+									disabled={logoutMutation.isPending}
+								>
+									{logoutMutation.isPending ? 'ログアウト中…' : 'ログアウト'}
+								</button>
+							</div>
+						</div>
 					</div>
 				</header>
 				<main className="content">{renderContent()}</main>
@@ -669,6 +734,31 @@ function MonthFilterControls({ value, onChange }) {
 				<button className="btn" type="button" onClick={() => onChange(currentMonth)}>今月</button>
 				<button className="btn" type="button" onClick={() => onChange(previousMonth)}>先月</button>
 				<button className="btn" type="button" onClick={() => onChange('')} disabled={!value}>クリア</button>
+			</div>
+		</div>
+	);
+}
+
+function LoginView() {
+	return (
+		<div className="login-view">
+			<div className="login-card">
+				<div className="logo-mark large">EM</div>
+				<h1>EasyMoney</h1>
+				<p>ご利用には組織アカウントでのログインが必要です。</p>
+				<button className="btn primary" type="button" onClick={() => { window.location.href = '/api/auth/login'; }}>
+					OAuth でログイン
+				</button>
+			</div>
+		</div>
+	);
+}
+
+function FullScreenSpinner() {
+	return (
+		<div className="login-view">
+			<div className="login-card">
+				<p className="loading-text">読み込み中…</p>
 			</div>
 		</div>
 	);

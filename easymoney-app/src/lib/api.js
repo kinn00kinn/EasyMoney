@@ -68,4 +68,6 @@ export const api = {
 		return response;
 	},
 	restoreBackup: (payload) => request('/backup', { method: 'POST', body: payload }),
+	getCurrentUser: () => request('/auth/me'),
+	logout: () => request('/auth/logout', { method: 'POST' }),
 };

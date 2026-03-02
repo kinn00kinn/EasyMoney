@@ -91,6 +91,155 @@ const decodePayPayCsvText = async (file) => {
 	return text;
 };
 
+const buildOAuthAuthorizeUrl = (config, state) => {
+	const authorizeUrl = new URL(config.authorizationUrl);
+	authorizeUrl.searchParams.set('response_type', 'code');
+	authorizeUrl.searchParams.set('client_id', config.clientId);
+	authorizeUrl.searchParams.set('redirect_uri', config.redirectUri);
+	authorizeUrl.searchParams.set('scope', config.scopes);
+	authorizeUrl.searchParams.set('state', state);
+	return authorizeUrl.toString();
+};
+
+const exchangeCodeForToken = async (config, code) => {
+	const body = new URLSearchParams({
+		grant_type: 'authorization_code',
+		code,
+		redirect_uri: config.redirectUri,
+		client_id: config.clientId,
+		client_secret: config.clientSecret,
+	});
+	const response = await fetch(config.tokenUrl, {
+		method: 'POST',
+		headers: { 'content-type': 'application/x-www-form-urlencoded' },
+		body,
+	});
+	if (!response.ok) {
+		throw createHttpError(500, 'Failed to exchange OAuth code');
+	}
+	return response.json();
+};
+
+const fetchUserProfile = async (config, accessToken) => {
+	const response = await fetch(config.userInfoUrl, {
+		headers: { authorization: `Bearer ${accessToken}` },
+	});
+	if (!response.ok) {
+		throw createHttpError(500, 'Failed to fetch user profile');
+	}
+	return response.json();
+};
+
+const parseCookies = (header) => {
+	const map = new Map();
+	if (!header) return map;
+	for (const part of header.split(';')) {
+		const [key, ...rest] = part.trim().split('=');
+		if (!key) continue;
+		map.set(key, decodeURIComponent(rest.join('=')));
+	}
+	return map;
+};
+
+const createCookie = (name, value, { maxAge, httpOnly = true, secure = true, sameSite = 'Lax', path = '/' } = {}) => {
+	let cookie = `${name}=${encodeURIComponent(value)}; Path=${path}; SameSite=${sameSite}`;
+	if (httpOnly) cookie += '; HttpOnly';
+	if (secure) cookie += '; Secure';
+	if (maxAge) cookie += `; Max-Age=${maxAge}`;
+	return cookie;
+};
+
+const SESSION_COOKIE = 'session_id';
+const STATE_COOKIE = 'oauth_state';
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
+
+const shouldUseSecureCookies = (env) => env?.AUTH_COOKIE_SECURE !== 'false';
+
+const getOAuthConfig = (env) => {
+	const {
+		OAUTH_CLIENT_ID,
+		OAUTH_CLIENT_SECRET,
+		OAUTH_AUTHORIZATION_URL,
+		OAUTH_TOKEN_URL,
+		OAUTH_USERINFO_URL,
+		OAUTH_REDIRECT_URI,
+		OAUTH_SCOPES,
+		OAUTH_ALLOWED_EMAILS,
+	} = env;
+	if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !OAUTH_AUTHORIZATION_URL || !OAUTH_TOKEN_URL || !OAUTH_USERINFO_URL || !OAUTH_REDIRECT_URI) {
+		return null;
+	}
+	return {
+		clientId: OAUTH_CLIENT_ID,
+		clientSecret: OAUTH_CLIENT_SECRET,
+		authorizationUrl: OAUTH_AUTHORIZATION_URL,
+		tokenUrl: OAUTH_TOKEN_URL,
+		userInfoUrl: OAUTH_USERINFO_URL,
+		redirectUri: OAUTH_REDIRECT_URI,
+		scopes: OAUTH_SCOPES || 'openid profile email',
+		allowedEmails: OAUTH_ALLOWED_EMAILS ? OAUTH_ALLOWED_EMAILS.split(',').map((v) => v.trim().toLowerCase()).filter(Boolean) : null,
+	};
+};
+
+const setSessionHeader = (request, session) => {
+	const cloned = new Request(request);
+	cloned.headers.set('x-session-data', JSON.stringify(session));
+	return cloned;
+};
+
+const getSessionFromRequest = (request) => {
+	const header = request.headers.get('x-session-data');
+	if (!header) return null;
+	try {
+		return JSON.parse(header);
+	} catch {
+		return null;
+	}
+};
+
+const createSessionRecord = async (env, profile) => {
+	const sessionId = crypto.randomUUID();
+	const now = Date.now();
+	const expiresAt = new Date(now + SESSION_TTL_SECONDS * 1000).toISOString();
+	await env.DB.prepare(
+		`INSERT INTO sessions (id, user_id, user_email, user_name, user_avatar, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+	)
+		.bind(sessionId, profile.id, profile.email ?? null, profile.name ?? null, profile.avatar ?? null, expiresAt)
+		.run();
+	return { id: sessionId, ...profile, expires_at: expiresAt };
+};
+
+const deleteSessionRecord = async (env, id) => {
+	await env.DB.prepare(`DELETE FROM sessions WHERE id = ?`).bind(id).run();
+};
+
+const authenticateRequest = async (request, env) => {
+	const cookies = parseCookies(request.headers.get('cookie'));
+	const sessionId = cookies.get(SESSION_COOKIE);
+	if (!sessionId) {
+		throw createHttpError(401, 'Unauthorized');
+	}
+	const nowIso = new Date().toISOString();
+	const session = await env.DB.prepare(
+		`SELECT * FROM sessions WHERE id = ? AND expires_at > ?`,
+	)
+		.bind(sessionId, nowIso)
+		.first();
+	if (!session) {
+		throw createHttpError(401, 'Unauthorized');
+	}
+	const newExpires = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
+	await env.DB.prepare(`UPDATE sessions SET expires_at = ? WHERE id = ?`).bind(newExpires, session.id).run();
+	return {
+		session,
+	};
+};
+
+const PUBLIC_API_PATTERNS = [/^\/api\/health$/, /^\/api\/auth\/login/, /^\/api\/auth\/callback$/];
+
+const isPublicApiPath = (pathname) => PUBLIC_API_PATTERNS.some((pattern) => pattern.test(pathname));
+
 const baseAccount = z.object({
 	name: z.string().min(1),
 	type: z.enum(['cash', 'bank', 'credit']),
@@ -154,6 +303,100 @@ const confirmImportSchema = z.object({
 });
 
 router.get('/health', () => json({ ok: true }));
+
+router.get('/auth/login', (request, env) => {
+	const config = getOAuthConfig(env);
+	if (!config) {
+		throw createHttpError(500, 'OAuth is not configured');
+	}
+	const state = crypto.randomUUID();
+	const location = buildOAuthAuthorizeUrl(config, state);
+	return new Response(null, {
+		status: 302,
+		headers: {
+			Location: location,
+			'Set-Cookie': createCookie(STATE_COOKIE, state, { maxAge: 300, secure: shouldUseSecureCookies(env) }),
+		},
+	});
+});
+
+router.get('/auth/callback', async (request, env) => {
+	const config = getOAuthConfig(env);
+	if (!config) {
+		throw createHttpError(500, 'OAuth is not configured');
+	}
+	const url = new URL(request.url);
+	const code = url.searchParams.get('code');
+	const state = url.searchParams.get('state');
+	if (!code || !state) {
+		throw createHttpError(400, 'Missing OAuth parameters');
+	}
+	const cookies = parseCookies(request.headers.get('cookie'));
+	const storedState = cookies.get(STATE_COOKIE);
+	if (!storedState || storedState !== state) {
+		throw createHttpError(400, 'Invalid OAuth state');
+	}
+	const tokenResponse = await exchangeCodeForToken(config, code);
+	const profile = await fetchUserProfile(config, tokenResponse.access_token);
+	const userEmail = (profile.email || '').toLowerCase();
+	if (config.allowedEmails && (!userEmail || !config.allowedEmails.includes(userEmail))) {
+		throw createHttpError(403, 'Access denied for this account');
+	}
+	const sessionProfile = {
+		id: profile.sub ?? profile.id ?? userEmail ?? profile.name ?? 'user',
+		email: profile.email ?? null,
+		name: profile.name ?? profile.email ?? 'User',
+		avatar: profile.picture ?? profile.avatar_url ?? null,
+	};
+	const session = await createSessionRecord(env, sessionProfile);
+	return new Response(null, {
+		status: 302,
+		headers: {
+			Location: '/',
+			'Set-Cookie': [
+				createCookie(SESSION_COOKIE, session.id, { maxAge: SESSION_TTL_SECONDS, secure: shouldUseSecureCookies(env) }),
+				createCookie(STATE_COOKIE, '', { maxAge: 0, secure: shouldUseSecureCookies(env) }),
+			].join(', '),
+		},
+	});
+});
+
+router.get('/auth/me', async (request, env) => {
+	let session = getSessionFromRequest(request);
+	if (!session) {
+		const result = await authenticateRequest(request, env);
+		session = {
+			user_id: result.session.user_id,
+			user_email: result.session.user_email,
+			user_name: result.session.user_name,
+			user_avatar: result.session.user_avatar,
+		};
+	}
+	return json({
+		data: {
+			id: session.user_id,
+			email: session.user_email,
+			name: session.user_name,
+			avatar: session.user_avatar,
+		},
+	});
+});
+
+router.post('/auth/logout', async (request, env) => {
+	const cookies = parseCookies(request.headers.get('cookie'));
+	const sessionId = cookies.get(SESSION_COOKIE);
+	if (sessionId) {
+		await deleteSessionRecord(env, sessionId);
+	}
+	return json(
+		{ ok: true },
+		{
+			headers: {
+				'Set-Cookie': createCookie(SESSION_COOKIE, '', { maxAge: 0, secure: shouldUseSecureCookies(env) }),
+			},
+		},
+	);
+});
 
 router.get('/accounts', async (_request, env) => {
 	const result = await env.DB.prepare(
@@ -1664,7 +1907,18 @@ export default {
 					{ status: 500 },
 				);
 			}
-			return await router.fetch(request, env, ctx);
+			let authedRequest = request;
+			if (!isPublicApiPath(url.pathname)) {
+				const { session } = await authenticateRequest(request, env);
+				const sessionData = {
+					user_id: session.user_id,
+					user_email: session.user_email,
+					user_name: session.user_name,
+					user_avatar: session.user_avatar,
+				};
+				authedRequest = setSessionHeader(request, sessionData);
+			}
+			return await router.fetch(authedRequest, env, ctx);
 		} catch (error) {
 			console.error('API error', error);
 			const status = error.status || 500;

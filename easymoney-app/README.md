@@ -85,6 +85,17 @@ npm run deploy     # D1 設定チェック後に wrangler deploy
 - `ASSETS` … Cloudflare による静的アセット配信 (C3 テンプレートで自動付与)
 - `DEMO_TOKEN` … デモデータ投入 API 用のトークン。任意のランダム文字列に置き換えてください。
 
+### OAuth ログイン
+
+本番環境では OAuth を介したログインが必要です。`wrangler.toml/json` あるいは Cloudflare Dashboard で次の変数を設定してください。
+
+- `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`
+- `OAUTH_AUTHORIZATION_URL`, `OAUTH_TOKEN_URL`, `OAUTH_USERINFO_URL`
+- `OAUTH_REDIRECT_URI` (例: `https://<your-domain>/api/auth/callback`)
+- 任意: `OAUTH_SCOPES` (デフォルトは `openid profile email`)
+- 任意: `OAUTH_ALLOWED_EMAILS` (カンマ区切りで許可ドメイン/メールを制限)
+- 任意: `AUTH_COOKIE_SECURE` (`false` にすると開発用 HTTP でも Cookie をセットできます)
+
 必要に応じて API キーや他サービスのバインディングを `wrangler.jsonc` の `vars` セクションに追加してください。
 
 ## デモデータの投入
